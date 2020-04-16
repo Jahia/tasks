@@ -49,10 +49,10 @@
     <parent>
         <groupId>org.jahia.modules</groupId>
         <artifactId>jahia-modules</artifactId>
-        <version>7.1.0.0</version>
+        <version>7.5.0.0-SNAPSHOT</version>
     </parent>
     <artifactId>tasks</artifactId>
-	<version>7.1.5-SNAPSHOT</version>
+	<version>8.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <name>Jahia Tasks</name>
     <description>Jahia template module for leveraging simple user and shared task management.</description>
@@ -60,14 +60,16 @@
         <connection>scm:git:git@github.com:Jahia/tasks.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/tasks.git</developerConnection>
         <url>scm:git:git@github.com:Jahia/tasks.git</url>
-      <tag>HEAD</tag>
-  </scm>
+        <tag>HEAD</tag>
+    </scm>
 
     <properties>
         <jahia-depends>default,userDashboard</jahia-depends>
         <export-package>org.jahia.modules.tasks.rules</export-package>
         <jahia-module-type>system</jahia-module-type>
         <jahia-deploy-on-site>system</jahia-deploy-on-site>
+        <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
+        <jahia-module-signature>MC0CFQCGNMgmNnACK7eXK5MWzQpf2N37kwIUZiHu83hHJFl6DqMBsfokgm4CkqE=</jahia-module-signature>
     </properties>
 
     <repositories>
