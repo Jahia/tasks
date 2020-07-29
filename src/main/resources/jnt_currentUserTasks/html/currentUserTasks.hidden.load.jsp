@@ -76,6 +76,5 @@
     </c:if>
 </c:if>
 
-<query:definition var="listQuery" statement="${sql}" scope="request"/>
-<c:set target="${moduleMap}" property="listQuery" value="${listQuery}" />
+<c:set target="${moduleMap}" property="listQuerySql" value="${sql}" />
 <c:set var="editable" value="false" scope="request"/>
