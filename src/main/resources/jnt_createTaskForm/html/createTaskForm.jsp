@@ -39,7 +39,8 @@
         var username = node['username'];
         return username != title ? title + " (" + username + ")" : username;
     }
-    $(document).ready(function() {
+
+    $(document).ready(function () {
 
         $("a#createTasks").fancybox();
 
@@ -56,6 +57,13 @@
                 <c:param name="roles" value="${roles}"/>
             </c:if>
         </c:url>
+        $.ajax({
+            url: "${findUserURL}?q=a*&limit=1",
+            error: function (_) {
+                console.error("${findUserURL} is not accessible, the legacy-find-users module have to be started to have access to this endpoint");
+            },
+            dataType: 'json'
+        });
         $("#task_assignee").autocomplete("${findUserURL}", {
                         dataType: "json",
                         cacheLength: 1,
@@ -82,7 +90,7 @@
             rules: {
                 'jcr:title': "required"
             },
-            submitHandler: function(form) {
+            submitHandler: function (form) {
                 var datePicked = $("\#${currentNode.name}-dueDate").val().replace(/^\s+|\s+$/g, '').replace(" ", "T");
                 $("#dueDate_hidden").val(datePicked);
                 $("#submit_task").attr('disabled', 'disabled');
@@ -92,7 +100,8 @@
     });
 </script>
 <c:set var="title">${currentNode.properties['jcr:title'].string}</c:set>
-<c:if test="${empty currentNode.properties['jcr:title'].string}"><c:set var="title"><fmt:message key="label.add.new.task"/></c:set></c:if>
+<c:if test="${empty currentNode.properties['jcr:title'].string}"><c:set var="title"><fmt:message
+        key="label.add.new.task"/></c:set></c:if>
 
 <a class="aButton createTasks" id="createTasks" href="#createTasksForm"><span>${fn:escapeXml(title)}</span></a>
 
@@ -105,69 +114,72 @@
             <jcr:propertyInitializers nodeType="jnt:task" name="priority" var="priorities"/>
 
             <template:tokenizedForm>
-            <form id="createTaskForm" method="post" action="<c:url value='${url.basePreview}${bindedComponent.path}/tasks/*'/>">
-                <input type="hidden" name="jcrNodeType" value="jnt:task">
-                <input type="hidden" name="jcrParentType" value="jnt:tasks">
-                <input type="hidden" name="type" value="${taskType}"/>
-                <input type="hidden" name="jcrRedirectTo"
-                       value="<c:url value='${url.base}${functions:escapePath(renderContext.mainResource.node.path)}.${renderContext.mainResource.template}'/>">
+                <form id="createTaskForm" method="post"
+                      action="<c:url value='${url.basePreview}${bindedComponent.path}/tasks/*'/>">
+                    <input type="hidden" name="jcrNodeType" value="jnt:task">
+                    <input type="hidden" name="jcrParentType" value="jnt:tasks">
+                    <input type="hidden" name="type" value="${taskType}"/>
+                    <input type="hidden" name="jcrRedirectTo"
+                           value="<c:url value='${url.base}${functions:escapePath(renderContext.mainResource.node.path)}.${renderContext.mainResource.template}'/>">
 
-                <p>
-                    <label for="task_title">
-                        <fmt:message key="mix_title.jcr_title"/>
-                    </label>
-                    <input type="text" name="jcr:title" id="task_title" class="field" value="" tabindex="16"/></p>
-
-                <c:if test="${currentNode.properties['useDescription'].boolean}">
                     <p>
-                        <label for="task_description"><fmt:message key="jnt_task.description"/>:</label>
-                        <textarea name="description" id="task_description" class="field" value=""
-                                  tabindex="17"></textarea>
-                    </p>
-                </c:if>
+                        <label for="task_title">
+                            <fmt:message key="mix_title.jcr_title"/>
+                        </label>
+                        <input type="text" name="jcr:title" id="task_title" class="field" value="" tabindex="16"/></p>
 
-                <c:if test="${currentNode.properties['usePriority'].boolean}">
-                    <p>
-                        <label for="task_priority"><fmt:message key="jnt_task.priority"/>:</label>
-                        <select name="priority" id="task_priority" class="combo" tabindex="21">
-                            <c:forEach items="${priorities}" var="priority">
-                                <option  <c:if test="${priority.value.string eq 'normal'}"> selected </c:if>
-                                         value="${priority.value.string}"> ${priority.displayName} </option>
-                            </c:forEach>
-                        </select>
-                    </p>
-                </c:if>
-                <c:if test="${currentNode.properties['useAssignee'].boolean}">
-                    <p>
-                        <label for="task_assignee"><fmt:message key="jnt_task.assignee"/>:</label>
+                    <c:if test="${currentNode.properties['useDescription'].boolean}">
+                        <p>
+                            <label for="task_description"><fmt:message key="jnt_task.description"/>:</label>
+                            <textarea name="description" id="task_description" class="field" value=""
+                                      tabindex="17"></textarea>
+                        </p>
+                    </c:if>
 
-                        <input id="task_assignee" name="assigneeName" type="text" value="${startSearching}" tabindex="22"
-                               onfocus="if(this.value==this.defaultValue)this.value='';"
-                               onblur="if(this.value=='')this.value=this.defaultValue;" class="text-input"/>
-                        <input  type="text" id="assignee_hidden" name="assigneeUserKey" style="display:none"/>
+                    <c:if test="${currentNode.properties['usePriority'].boolean}">
+                        <p>
+                            <label for="task_priority"><fmt:message key="jnt_task.priority"/>:</label>
+                            <select name="priority" id="task_priority" class="combo" tabindex="21">
+                                <c:forEach items="${priorities}" var="priority">
+                                    <option  <c:if test="${priority.value.string eq 'normal'}"> selected </c:if>
+                                            value="${priority.value.string}"> ${priority.displayName} </option>
+                                </c:forEach>
+                            </select>
+                        </p>
+                    </c:if>
+                    <c:if test="${currentNode.properties['useAssignee'].boolean}">
+                        <p>
+                            <label for="task_assignee"><fmt:message key="jnt_task.assignee"/>:</label>
 
-                    </p>
-                </c:if>
-                <c:if test="${currentNode.properties['useDueDate'].boolean}">
-                    <p>
-                        <label for="task_dueDate"><fmt:message key="jnt_task.dueDate"/>:</label>
+                            <input id="task_assignee" name="assigneeName" type="text" value="${startSearching}"
+                                   tabindex="22"
+                                   onfocus="if(this.value==this.defaultValue)this.value='';"
+                                   onblur="if(this.value=='')this.value=this.defaultValue;" class="text-input"/>
+                            <input type="text" id="assignee_hidden" name="assigneeUserKey" style="display:none"/>
 
-                        <input  type="text" id="dueDate_hidden" name="dueDate" style="display:none"/>
+                        </p>
+                    </c:if>
+                    <c:if test="${currentNode.properties['useDueDate'].boolean}">
+                        <p>
+                            <label for="task_dueDate"><fmt:message key="jnt_task.dueDate"/>:</label>
 
-                        <input ${disabled} id="${currentNode.name}-dueDate" type="text" name="dueDate-picker" id="task_dueDate"
-                                           class="" value="" tabindex="24" readonly="readonly"/>
-                        <uiComponents:dateSelector fieldId="${currentNode.name}-dueDate" time="true" >
-                            {dateFormat: $.datepicker.ISO_8601, showButtonPanel: true, showOn:'focus'}
-                        </uiComponents:dateSelector>
+                            <input type="text" id="dueDate_hidden" name="dueDate" style="display:none"/>
 
-                    </p>
-                </c:if>
-                <input type="hidden" name="state" value="active"/>
+                            <input ${disabled} id="${currentNode.name}-dueDate" type="text" name="dueDate-picker"
+                                               id="task_dueDate"
+                                               class="" value="" tabindex="24" readonly="readonly"/>
+                            <uiComponents:dateSelector fieldId="${currentNode.name}-dueDate" time="true">
+                                {dateFormat: $.datepicker.ISO_8601, showButtonPanel: true, showOn:'focus'}
+                            </uiComponents:dateSelector>
 
-                <div><input type="submit" id="submit_task" class="button" value="<fmt:message key='label.submit'/>"
-                                              tabindex="28"/>
-                </div>
-            </form>
+                        </p>
+                    </c:if>
+                    <input type="hidden" name="state" value="active"/>
+
+                    <div><input type="submit" id="submit_task" class="button" value="<fmt:message key='label.submit'/>"
+                                tabindex="28"/>
+                    </div>
+                </form>
             </template:tokenizedForm>
         </div>
         <div class='clear'></div>
