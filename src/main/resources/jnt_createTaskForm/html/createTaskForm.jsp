@@ -43,7 +43,8 @@
 
         $("a#createTasks").fancybox();
 
-        <c:url value='${url.findUser}' var="findUserURL">
+        // /cms/findUser is coming from the legacy-find-users module
+        <c:url value='/cms/findUser' var="findUserURL">
             <c:if test="${not empty currentNode.properties['checkRolesOnMainResource'] and currentNode.properties['checkRolesOnMainResource'].boolean and not empty currentNode.properties['rolesList']}">
                 <c:set var="roles" value=""/>
                 <jcr:nodeProperty node="${currentNode}" name="rolesList" var="rolesList"/>
