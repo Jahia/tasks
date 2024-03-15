@@ -1,4 +1,4 @@
-# This workflow is triggered every time a change is pushed to any branches 
+# This workflow is triggered every time a change is pushed to any branches
 # Github actions command reference: https://docs.github.com/en/actions/learn-github-actions/workflow-syntax-for-github-actions
 name: On Code Change (PR)
 
