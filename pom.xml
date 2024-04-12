@@ -52,7 +52,7 @@
         <version>8.0.0.0</version>
     </parent>
     <artifactId>tasks</artifactId>
-	<version>8.2.0-SNAPSHOT</version>
+	<version>8.2.0</version>
     <packaging>bundle</packaging>
     <name>Jahia Tasks</name>
     <description>Jahia template module for leveraging simple user and shared task management.</description>
@@ -60,7 +60,7 @@
         <connection>scm:git:git@github.com:Jahia/tasks.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/tasks.git</developerConnection>
         <url>scm:git:git@github.com:Jahia/tasks.git</url>
-        <tag>HEAD</tag>
+        <tag>8_2_0</tag>
     </scm>
 
     <properties>
