@@ -44,7 +44,7 @@
                     </p>
                 </c:if>
                 <c:if test="${not empty task.properties['description']}">
-                    <p>${task.properties['description'].string}</p>
+                    <p>${fn:escapeXml(task.properties['description'].string)}</p>
                 </c:if>
                 <template:tokenizedForm>
                     <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.basePreview}'/>${task.path}">
@@ -125,7 +125,14 @@
                         </c:if>
                         <jcr:node var="taskData" path="${task.path}/taskData"/>
                         <c:if test="${not empty taskData}">
-                            <template:module path="${task.path}/taskData" view="taskData"/>
+                            <c:choose>
+                                <c:when test="${taskData.primaryNodeTypeName eq 'jnt:simpleWorkflow'}">
+                                    <template:module path="${task.path}/taskData" view="simpleWorkflow" />
+                                </c:when>
+                                <c:otherwise>
+                                    <template:module path="${task.path}/taskData" view="taskData" />
+                                </c:otherwise>
+                            </c:choose>
                         </c:if>
                     </c:when>
                     <c:when test="${task.properties.state.string == 'finished'}">

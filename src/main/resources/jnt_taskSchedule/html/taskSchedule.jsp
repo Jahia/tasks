@@ -1,6 +1,5 @@
 <%@ page import="org.jahia.services.workflow.WorkflowTask"%>
 <%@ page import="org.joda.time.DateTime" %>
-<%@ page import="org.joda.time.base.BaseDateTime" %>
 <%@ page import="org.joda.time.format.DateTimeFormatter" %>
 <%@ page import="org.joda.time.format.ISODateTimeFormat" %>
 <%@ page contentType="text/html; UTF-8" %>
@@ -83,10 +82,10 @@
                 <c:choose>
                     <c:when test="${displayableNode.path ne renderContext.mainResource.node.path}">
                         <span class="value"><a
-                                href="<c:url value='${url.base}${displayableNode.path}.html'/>">${task.properties['jcr:title'].string}</a></span>
+                                href="<c:url value='${url.base}${displayableNode.path}.html'/>">${fn:escapeXml(task.properties['jcr:title'].string)}</a></span>
                     </c:when>
                     <c:otherwise>
-                        <span class="value">${task.properties['jcr:title'].string}</span>
+                        <span class="value">${fn:escapeXml(task.properties['jcr:title'].string)}</span>
                     </c:otherwise>
                 </c:choose>
             </li>
@@ -99,7 +98,7 @@
             <c:if test="${not process.completed}">
                 <workflow:workflow id="${process.processId}" provider="${process.provider}" var="active"/>
                 <c:forEach items="${active.availableActions}" var="task">
-                    <c:if test='<%=pageContext.getAttribute("task") instanceof WorkflowTask %>'>                
+                    <c:if test='<%=pageContext.getAttribute("task") instanceof WorkflowTask %>'>
                         <c:if test="${not empty task.dueDate and task.dueDate.time ge startDateDate.time and task.dueDate.time le endDateDate.time}">
                             <c:set var="emptyTasks" value="false"/>
                             <fmt:formatDate pattern="dd/MM/yyyy"
@@ -111,7 +110,7 @@
                                         class="task-${fn:replace(task.name,' ','_')}">${task.displayName}</span>
                                     - ${node.name}</a></span>
                             </li>
-                        </c:if>                            
+                        </c:if>
                     </c:if>
                 </c:forEach>
             </c:if>
