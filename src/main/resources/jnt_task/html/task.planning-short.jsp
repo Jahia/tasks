@@ -10,14 +10,14 @@
         <div class="finishedTask">
             <span class="value"><fmt:formatDate value="${currentNode.properties['dueDate'].date.time}"
                                                 pattern="dd/MM/yyyy"/></span>
-            <span class="value">${currentNode.properties['jcr:title'].string}</span>
+            <span class="value">${fn:escapeXml(currentNode.properties['jcr:title'].string)}</span>
         </div>
     </c:when>
     <c:otherwise>
         <div class="unfinishedTask">
             <span class="value"><fmt:formatDate value="${currentNode.properties['dueDate'].date.time}"
                                                 pattern="dd/MM/yyyy"/></span>
-            <span class="value">${currentNode.properties['jcr:title'].string}</span>
+            <span class="value">${fn:escapeXml(currentNode.properties['jcr:title'].string)}</span>
         </div>
     </c:otherwise>
 </c:choose>

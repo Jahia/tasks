@@ -105,7 +105,7 @@
                 post()
             }
         }
-    };
+    }
     function sendNewAssignee(uuid, task, key) {
         if (ready) {
             ready = false;
@@ -117,7 +117,7 @@
                 });
             }, "json");
         }
-    };
+    }
 
     function switchTaskDisplay(identifier) {
         $(".taskdetail").each(function () {
@@ -179,7 +179,7 @@
                         <div style="display:none;" class="taskdetail" id="taskdetail_${task.identifier}">
                             <p class="task-info-p"><fmt:message key="label.createdBy"/>: ${task.properties['jcr:createdBy'].string}, <fmt:message key="label.createdOn"/> <fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></p>
                             <c:if test="${not empty task.properties['priority']}"><p class="task-priority-p"><fmt:message key="jnt_task.priority"/>: <span class="task-priority task-${task.properties['priority'].string}"><jcr:nodePropertyRenderer node="${task}" name="priority" renderer="resourceBundle"/></span></p></c:if>
-                            <c:if test="${not empty task.properties['description']}"><p class="task-text">${task.properties['description'].string}</p></c:if>
+                            <c:if test="${not empty task.properties['description']}"><p class="task-text">${fn:escapeXml(task.properties['description'].string)}</p></c:if>
                             <template:tokenizedForm>
                                 <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.base}'/>${task.path}">
                                 </form>
@@ -235,7 +235,14 @@
                                         <li>
                                             <jcr:node var="taskData" path="${task.path}/taskData"/>
                                             <c:if test="${not empty taskData}">
-                                                <template:module path="${task.path}/taskData" view="taskData" />
+                                                <c:choose>
+                                                    <c:when test="${taskData.primaryNodeTypeName eq 'jnt:simpleWorkflow'}">
+                                                        <template:module path="${task.path}/taskData" view="simpleWorkflow" />
+                                                    </c:when>
+                                                    <c:otherwise>
+                                                        <template:module path="${task.path}/taskData" view="taskData" />
+                                                    </c:otherwise>
+                                                </c:choose>
                                             </c:if>
                                         </li>
                                     </c:when>

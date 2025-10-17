@@ -76,14 +76,14 @@
     </div>
 </c:forEach>
 <p class="taskTitle">
-    <span class="value">${currentNode.properties['jcr:title'].string}</span>
+    <span class="value">${fn:escapeXml(currentNode.properties['jcr:title'].string)}</span>
 </p>
 
 <p class="taskdate value"><fmt:formatDate value="${currentNode.properties['dueDate'].date.time}"
                                           pattern="dd/MM/yyyy"/></p>
 
 <p class="taskDescription">
-    ${currentNode.properties['description'].string}
+    ${fn:escapeXml(currentNode.properties['description'].string)}
 </p>
 <template:tokenizedForm>
     <form id="tokenForm_${currentNode.identifier}" name="tokenform_${currentNode.identifier}" method="post"
@@ -159,7 +159,14 @@
             <li>
                 <jcr:node var="taskData" path="${task.path}/taskData"/>
                 <c:if test="${not empty taskData}">
-                    <template:module path="${task.path}/taskData" view="taskData" />
+                    <c:choose>
+                        <c:when test="${taskData.primaryNodeTypeName eq 'jnt:simpleWorkflow'}">
+                            <template:module path="${task.path}/taskData" view="simpleWorkflow" />
+                        </c:when>
+                        <c:otherwise>
+                            <template:module path="${task.path}/taskData" view="taskData" />
+                        </c:otherwise>
+                    </c:choose>
                 </c:if>
             </li>
         </c:when>

@@ -99,7 +99,7 @@
         });
     });
 </script>
-<c:set var="title">${currentNode.properties['jcr:title'].string}</c:set>
+<c:set var="title">${fn:escapeXml(currentNode.properties['jcr:title'].string)}</c:set>
 <c:if test="${empty currentNode.properties['jcr:title'].string}"><c:set var="title"><fmt:message
         key="label.add.new.task"/></c:set></c:if>
 

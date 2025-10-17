@@ -29,20 +29,20 @@
                 <label class="left">
                     <fmt:message key="mix_title.jcr_title"/>
                 :</label>
-                <span class="value">${currentNode.properties['jcr:title'].string}</span>
+                <span class="value">${fn:escapeXml(currentNode.properties['jcr:title'].string)}</span>
 
             <p>
                 <label class="left">
                     <fmt:message key="jnt_task.description"/>
                     :</label>
-                <span class="value">${currentNode.properties.description.string}</span>
+                <span class="value">${fn:escapeXml(currentNode.properties.description.string)}</span>
             </p>
 
             <p>
                 <label class="left">
                     <fmt:message key="jnt_task.priority"/>
                     :</label>
-                <span class="right value">${currentNode.properties.priority.string}</span>
+                <span class="right value">${fn:escapeXml(currentNode.properties.priority.string)}</span>
             </p>
             <%--<p><label for="task_dueDate" class="left">Due date:</label>--%>
             <%--<input type="text" name="dueDate" id="task_dueDate" class="field" value="" tabindex="17" /></p>--%>
