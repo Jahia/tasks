@@ -1,5 +1,6 @@
 <%@ page import="org.jahia.services.workflow.WorkflowTask"%>
 <%@ page import="org.joda.time.DateTime" %>
+<%@ page import="org.joda.time.base.BaseDateTime" %>
 <%@ page import="org.joda.time.format.DateTimeFormatter" %>
 <%@ page import="org.joda.time.format.ISODateTimeFormat" %>
 <%@ page contentType="text/html; UTF-8" %>
