@@ -1,6 +1,7 @@
 {
   "name": "tasks-frontend",
   "version": "8.4.0-SNAPSHOT",
+  "license": "Apache-2.0",
   "type": "module",
   "files": [
     "dist"
@@ -8,7 +9,7 @@
   "scripts": {
     "build": "tsc --noEmit && vite build && yarn package",
     "clean": "rm -rf dist/",
-    "package": "yarn pack --out dist/package.tgz",
+    "package": "yarn pack --filename dist/package.tgz",
     "dev": "vite build --watch",
     "lint": "eslint ."
   },
