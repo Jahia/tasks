@@ -1,0 +1,40 @@
+{
+  "name": "tasks-frontend",
+  "version": "8.4.0-SNAPSHOT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit && vite build && yarn package",
+    "clean": "rm -rf dist/",
+    "package": "yarn pack --out dist/package.tgz",
+    "dev": "vite build --watch",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@jahia/javascript-modules-library": "^1.2.0",
+    "@jahia/vite-plugin": "^1.2.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.14"
+  },
+  "packageManager": "yarn@1.22.22",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "jahia": {
+    "snapshot": true,
+    "module-dependencies": "default,tasks",
+    "module-type": "templatesSet",
+    "server": "dist/server/index.js",
+    "static-resources": "/dist/client,/dist/assets"
+  }
+}

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    ==========================================================================================
+    =                   JAHIA'S DUAL LICENSING - IMPORTANT INFORMATION                       =
+    ==========================================================================================
+
+                                    http://www.jahia.com
+
+        Copyright (C) 2002-2020 Jahia Solutions Group SA. All rights reserved.
+
+        THIS FILE IS AVAILABLE UNDER TWO DIFFERENT LICENSES:
+        1/GPL OR 2/JSEL
+
+        1/ GPL
+        ==================================================================================
+
+        IF YOU DECIDE TO CHOOSE THE GPL LICENSE, YOU MUST COMPLY WITH THE FOLLOWING TERMS:
+
+        This program is free software: you can redistribute it and/or modify
+        it under the terms of the GNU General Public License as published by
+        the Free Software Foundation, either version 3 of the License, or
+        (at your option) any later version.
+
+        This program is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+        GNU General Public License for more details.
+
+        You should have received a copy of the GNU General Public License
+        along with this program. If not, see <http://www.gnu.org/licenses />.
+
+
+        2/ JSEL - Commercial and Supported Versions of the program
+        ===================================================================================
+
+        IF YOU DECIDE TO CHOOSE THE JSEL LICENSE, YOU MUST COMPLY WITH THE FOLLOWING TERMS:
+
+        Alternatively, commercial and supported versions of the program - also known as
+        Enterprise Distributions - must be used in accordance with the terms and conditions
+        contained in a separate written agreement between you and Jahia Solutions Group SA.
+
+        If you are unsure which license is appropriate for your use,
+        please contact the sales department at sales@jahia.com.
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.jahia.modules</groupId>
+        <artifactId>tasks-parent</artifactId>
+        <version>8.4.0-SNAPSHOT</version>
+        <relativePath>..</relativePath>
+    </parent>
+    <artifactId>tasks</artifactId>
+    <packaging>bundle</packaging>
+    <name>Jahia Tasks</name>
+    <description>Jahia template module for leveraging simple user and shared task management.</description>
+
+    <properties>
+        <jahia-depends>default,userDashboard,graphql-dxm-provider</jahia-depends>
+        <export-package>org.jahia.modules.tasks.rules,org.jahia.modules.tasks.graphql</export-package>
+        <jahia-module-type>system</jahia-module-type>
+        <jahia-deploy-on-site>system</jahia-deploy-on-site>
+        <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
+        <jahia-module-signature>MC0CFQCSiYvnmU9n/raHdxUGTyMk9DdUZwIUDgiRGJ/tFKWU3L2GpeqzbI1gLfk=</jahia-module-signature>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>graphql-dxm-provider</artifactId>
+            <version>3.5.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- graphql-dxm-provider declares this itself as "provided", so it does not
+             propagate transitively. Must be declared here too (confirmed by a failed
+             local compile without it). Version picked independently; not verified to be
+             the exact one graphql-dxm-provider:3.5.1 was built against. -->
+        <dependency>
+            <groupId>io.github.graphql-java</groupId>
+            <artifactId>graphql-java-annotations</artifactId>
+            <version>21.5</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+                        <!-- Scan for @Component (OSGi Declarative Services) and emit OSGI-INF
+                             descriptors. Without this, @Component classes compile but never
+                             register (see jahia-java-osgi-declarative-services). -->
+                        <_dsannotations>*</_dsannotations>
+                    </instructions>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>2.7.11</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>makeAggregateBom</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <projectType>library</projectType>
+                    <schemaVersion>1.4</schemaVersion>
+                    <includeBomSerialNumber>true</includeBomSerialNumber>
+                    <includeCompileScope>true</includeCompileScope>
+                    <includeProvidedScope>false</includeProvidedScope>
+                    <includeRuntimeScope>true</includeRuntimeScope>
+                    <includeSystemScope>false</includeSystemScope>
+                    <includeTestScope>false</includeTestScope>
+                    <includeLicenseText>false</includeLicenseText>
+                    <outputReactorProjects>true</outputReactorProjects>
+                    <outputFormat>json</outputFormat>
+                    <outputName>java-bom.cdx</outputName>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

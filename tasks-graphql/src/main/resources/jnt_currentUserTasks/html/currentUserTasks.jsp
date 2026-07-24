@@ -131,6 +131,11 @@
 </script>
 <template:include view="hidden.header"/>
 <div id="tasklist">
+    <%-- HIER DEINE TEST-ZEILE EINFÜGEN --%>
+    <h1 style="color: red; background-color: yellow; padding: 10px; text-align: center;">
+        *** MEIN MAVEN DEPLOYMENT TEST ***
+    </h1>
+    
     <div id="${user.UUID}">
 
         <c:set value="${currentNode.properties['displayState'].boolean}" var="dispState"/>

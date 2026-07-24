@@ -4,3 +4,7 @@ target
 .DS_Store
 /.classpath
 /.project
+node_modules
+dist
+*.tgz
+yarn-error.log
