@@ -1,3 +1,4 @@
+import type {MutableRefObject} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Banner, Button, DataTable, EmptyData, Header, Loader, Menu, MenuItem, MoreVert} from '@jahia/moonstone';
 import type {DataTableColumn} from '@jahia/moonstone/DataTable';
@@ -20,11 +21,16 @@ type TaskBoardProps = {
     canReviewAll: boolean;
 };
 
-async function callGraphQL(
+type GraphQLResponse<T> = {
+    data?: T;
+    errors?: Array<{message: string}>;
+};
+
+async function callGraphQL<T = unknown>(
     endpoint: string,
     query: string,
     variables: Record<string, unknown>
-): Promise<Record<string, unknown>> {
+): Promise<T> {
     const response = await fetch(endpoint, {
         method: 'POST',
         credentials: 'same-origin',
@@ -35,9 +41,13 @@ async function callGraphQL(
         throw new Error(`Request failed with status ${response.status}`);
     }
 
-    const body = await response.json();
+    const body = await response.json() as GraphQLResponse<T>;
     if (body.errors && body.errors.length > 0) {
-        throw new Error(body.errors.map((error: {message: string}) => error.message).join('; '));
+        throw new Error(body.errors.map(error => error.message).join('; '));
+    }
+
+    if (!body.data) {
+        throw new Error('GraphQL response contained no data');
     }
 
     return body.data;
@@ -70,7 +80,7 @@ function outcomeLabel(outcome: string): string {
 type MenuAction = {
     label: string;
     mutation: string;
-    variables: Record<string, unknown>;
+    variables: {id: string} & Record<string, unknown>;
 };
 
 type ActionsCellProps = {
@@ -87,9 +97,13 @@ type ActionsCellProps = {
 // security boundary; a wrong guess here just surfaces as an error banner.
 function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: ActionsCellProps) {
     const [isMenuOpen, setMenuOpen] = useState(false);
-    const anchorRef = useRef<HTMLDivElement>(null!);
+    // Menu's anchorEl prop is typed as a non-nullable MutableRefObject, but a
+    // DOM ref can only ever start out null -- the cast is confined to this one
+    // prop instead of widening the ref's own (accurately nullable) type.
+    const anchorRef = useRef<HTMLDivElement>(null);
 
     const canAct = task.owner === currentUserKey || canReviewAll;
+    const targetUrl = task.targetNode?.url;
     const actions: MenuAction[] = [];
 
     if (task.state === 'active') {
@@ -127,13 +141,17 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
                     onClick={() => setMenuOpen(true)}
                 />
             </div>
-            <Menu isDisplayed={isMenuOpen} anchorEl={anchorRef} onClose={() => setMenuOpen(false)}>
+            <Menu
+                isDisplayed={isMenuOpen}
+                anchorEl={anchorRef as MutableRefObject<HTMLDivElement>}
+                onClose={() => setMenuOpen(false)}
+            >
                 {actions.length === 0 ? (
                     <MenuItem label="No actions available" isDisabled/>
                 ) : (
-                    actions.map(action => (
+                    actions.map((action, index) => (
                         <MenuItem
-                            key={action.label}
+                            key={`${index}-${action.label}`}
                             label={action.label}
                             onClick={() => {
                                 setMenuOpen(false);
@@ -142,13 +160,13 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
                         />
                     ))
                 )}
-                {task.targetNode?.url && (
+                {targetUrl && (
                     <MenuItem
                         key="preview"
                         label="Preview"
                         onClick={() => {
                             setMenuOpen(false);
-                            window.open(task.targetNode!.url, '_blank', 'noopener,noreferrer');
+                            window.open(targetUrl, '_blank', 'noopener,noreferrer');
                         }}
                     />
                 )}
@@ -179,11 +197,11 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         setLoading(true);
         setError(null);
         try {
-            const data = await callGraphQL(graphqlEndpoint, TASK_BOARD_QUERY, {
+            const data = await callGraphQL<{taskBoard: TaskBoardConnection}>(graphqlEndpoint, TASK_BOARD_QUERY, {
                 first: PAGE_SIZE,
                 after: cursorsByPage.current.get(page)
             });
-            setConnection(data.taskBoard as TaskBoardConnection);
+            setConnection(data.taskBoard);
             setCurrentPage(page);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to load tasks.');
