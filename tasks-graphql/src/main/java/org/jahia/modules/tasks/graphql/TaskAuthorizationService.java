@@ -55,4 +55,24 @@ public class TaskAuthorizationService {
         }
         return false;
     }
+
+    /**
+     * Whether {@code user} is the current assignee of {@code taskNode} -- distinct from
+     * {@link #isOwnerOrCandidate}, which also admits an eligible-but-not-yet-assigned
+     * candidate (the right check for "assign to me"). Owner-restricted actions (suspend,
+     * unassign, complete, ...) need this stricter "is actually the assignee" check instead.
+     */
+    public boolean isAssignee(JCRNodeWrapper taskNode, JahiaUser user) {
+        String assigneeKey = taskNode.getPropertyAsString("assigneeUserKey");
+        return assigneeKey != null && !assigneeKey.isEmpty() && assigneeKey.equals(user.getUserKey());
+    }
+
+    /**
+     * Whether {@code user} may perform an owner-restricted action (suspend, unassign,
+     * complete, ...) on {@code taskNode}: either they are its assignee, or they hold the
+     * review role that already grants visibility into every task on the board.
+     */
+    public boolean canActOnTask(JCRNodeWrapper taskNode, JahiaUser user, JCRNodeWrapper scopeNode) throws RepositoryException {
+        return isAssignee(taskNode, user) || canReviewAllTasks(scopeNode);
+    }
 }

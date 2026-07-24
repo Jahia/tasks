@@ -122,4 +122,23 @@ public class TaskBoardQueryExtensions {
 
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
     }
+
+    @GraphQLField
+    @GraphQLNonNull
+    @GraphQLDescription("The current viewer's user key. Client-side UI uses this to decide which row actions to "
+            + "show; every mutation independently re-checks authorization server-side regardless of this value.")
+    public static String taskBoardCurrentUserKey() throws RepositoryException {
+        return JCRSessionFactory.getInstance().getCurrentUserSession().getUser().getUserKey();
+    }
+
+    @GraphQLField
+    @GraphQLNonNull
+    @GraphQLDescription("Whether the current viewer can act on every task on the board, not just their own")
+    public static boolean taskBoardCanReviewAll() throws RepositoryException {
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        TaskAuthorizationService authorizationService = Objects.requireNonNull(
+                BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
+                "TaskAuthorizationService OSGi service is not available");
+        return authorizationService.canReviewAllTasks(session.getNode("/"));
+    }
 }

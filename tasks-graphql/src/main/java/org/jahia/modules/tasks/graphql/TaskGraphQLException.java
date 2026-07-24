@@ -7,6 +7,10 @@ package org.jahia.modules.tasks.graphql;
  */
 public class TaskGraphQLException extends RuntimeException {
 
+    public TaskGraphQLException(String message) {
+        super(message);
+    }
+
     public TaskGraphQLException(String message, Throwable cause) {
         super(message, cause);
     }

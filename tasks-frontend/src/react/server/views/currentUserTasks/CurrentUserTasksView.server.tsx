@@ -1,5 +1,9 @@
-import {jahiaComponent, Island} from '@jahia/javascript-modules-library';
-import {TaskBoard} from '../../../../client/components/TaskBoard';
+import {jahiaComponent, Island, useGQLQuery, buildEndpointUrl} from '@jahia/javascript-modules-library';
+import TaskBoard from '../../../../client/components/TaskBoard.client';
+import {INITIAL_TASK_BOARD_QUERY} from '../../../../client/components/taskBoard.shared';
+import type {InitialTaskBoardQueryResult} from '../../../../client/components/taskBoard.shared';
+
+const PAGE_SIZE = 20;
 
 jahiaComponent(
     {
@@ -10,9 +14,29 @@ jahiaComponent(
         // Higher than the module's legacy .jsp default view, so this one wins.
         priority: 10
     },
-    () => (
-        <div className="task-board">
-            <Island component={TaskBoard} clientOnly/>
-        </div>
-    )
+    () => {
+        // Fetched here (SSR) rather than in the client island: useGQLQuery and
+        // buildEndpointUrl are part of @jahia/javascript-modules-library, which
+        // the client bundle is forbidden from importing at all. The island
+        // fetches every subsequent page/mutation itself via plain fetch().
+        const {data} = useGQLQuery({
+            query: INITIAL_TASK_BOARD_QUERY,
+            variables: {first: PAGE_SIZE}
+        });
+        const result = data as InitialTaskBoardQueryResult;
+
+        return (
+            <div className="task-board">
+                <Island
+                    component={TaskBoard}
+                    props={{
+                        initialConnection: result.taskBoard,
+                        graphqlEndpoint: buildEndpointUrl('/modules/graphql'),
+                        currentUserKey: result.taskBoardCurrentUserKey,
+                        canReviewAll: result.taskBoardCanReviewAll
+                    }}
+                />
+            </div>
+        );
+    }
 );
