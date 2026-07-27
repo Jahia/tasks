@@ -58,7 +58,7 @@
     <description>Jahia template module for leveraging simple user and shared task management.</description>
 
     <properties>
-        <jahia-depends>default,userDashboard,graphql-dxm-provider</jahia-depends>
+        <jahia-depends>default,graphql-dxm-provider</jahia-depends>
         <export-package>org.jahia.modules.tasks.rules,org.jahia.modules.tasks.graphql</export-package>
         <jahia-module-type>system</jahia-module-type>
         <jahia-deploy-on-site>system</jahia-deploy-on-site>
@@ -97,6 +97,22 @@
                              descriptors. Without this, @Component classes compile but never
                              register (see jahia-java-osgi-declarative-services). -->
                         <_dsannotations>*</_dsannotations>
+                        <!-- bnd's default policy imports these two at [21.5,22) because we
+                             compile against graphql-java-annotations 21.5, but the real
+                             graphql-dxm-provider bundle running in Jahia was built against,
+                             and itself imports at, [21.1,22); confirmed by inspecting its own
+                             MANIFEST.MF. Our narrower default range fails to resolve against
+                             Jahia's actual (older) exported version. Widened to match what is
+                             really running rather than marking the import optional, since
+                             these annotation classes are required at class-load time for our
+                             @GraphQLField-annotated methods; making them optional would trade
+                             this clean install-time failure for a NoClassDefFoundError at
+                             runtime instead. -->
+                        <Import-Package>
+                            graphql.annotations.annotationTypes;version="[21.1,22)",
+                            graphql.annotations.connection;version="[21.1,22)",
+                            *
+                        </Import-Package>
                     </instructions>
                 </configuration>
             </plugin>

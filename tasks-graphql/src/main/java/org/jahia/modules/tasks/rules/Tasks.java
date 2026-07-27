@@ -44,18 +44,11 @@
 package org.jahia.modules.tasks.rules;
 
 import org.apache.commons.lang.StringUtils;
-import org.drools.core.spi.KnowledgeHelper;
-import org.jahia.ajax.gwt.client.data.definition.GWTJahiaNodePropertyValue;
-import org.jahia.exceptions.JahiaException;
 import org.jahia.registries.ServicesRegistry;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRPropertyWrapper;
-import org.jahia.services.content.decorator.JCRGroupNode;
 import org.jahia.services.content.decorator.JCRUserNode;
 import org.jahia.services.content.rules.AddedNodeFact;
-import org.jahia.services.sites.JahiaSite;
-import org.jahia.services.tasks.Task;
-import org.jahia.services.tasks.TaskService;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.workflow.WorkflowService;
 import org.jahia.services.workflow.WorkflowVariable;
@@ -66,7 +59,6 @@ import javax.jcr.PropertyIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 
@@ -79,7 +71,6 @@ public class Tasks {
     private transient static Logger logger = LoggerFactory.getLogger(Tasks.class);
 
     private static Tasks instance;
-    private TaskService taskService;
 
     private Tasks() {
         super();
@@ -90,63 +81,6 @@ public class Tasks {
             instance = new Tasks();
         }
         return instance;
-    }
-
-    public void createTask(String user, String title, String description, String priority, Date dueDate, String state,
-                           KnowledgeHelper drools) throws RepositoryException {
-        Task task = new Task(title, description);
-        if (priority != null) {
-            task.setPriority(Task.Priority.valueOf(priority));
-        }
-        task.setDueDate(dueDate);
-        if (state != null) {
-            task.setState(Task.State.valueOf(state));
-        }
-        taskService.createTask(task, user);
-    }
-
-    public void createTask(AddedNodeFact user, String title, String description, String priority, Date dueDate, String state,
-                           KnowledgeHelper drools) throws RepositoryException {
-        Task task = new Task(title, description);
-        if (priority != null) {
-            task.setPriority(Task.Priority.valueOf(priority));
-        }
-        task.setDueDate(dueDate);
-        if (state != null) {
-            task.setState(Task.State.valueOf(state));
-        }
-        taskService.createTask(task, (JCRUserNode) user.getNode());
-    }
-
-    public void createTask(String user, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        createTask(user, title, description, null, null, null, drools);
-    }
-
-    public void createTask(AddedNodeFact user, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        createTask(user, title, description, null, null, null, drools);
-    }
-
-    public void createTaskForGroupMembers(String group, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        String siteKey = null;
-        if (group.startsWith("/sites/")) {
-            siteKey = StringUtils.substringBetween(group, "/sites/", "/");
-        }
-        if (group.indexOf('/') != -1) {
-            group = StringUtils.substringAfterLast(group, "/");
-        }
-        taskService.createTaskForGroup(new Task(title, description), group, siteKey);
-    }
-
-    public void createTaskForGroupMembers(AddedNodeFact group, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        taskService.createTaskForGroup(new Task(title, description), (JCRGroupNode) group.getNode());
-    }
-
-    public void setTaskService(TaskService taskService) {
-        this.taskService = taskService;
     }
 
     public void assignTask(AddedNodeFact node, String username) {
