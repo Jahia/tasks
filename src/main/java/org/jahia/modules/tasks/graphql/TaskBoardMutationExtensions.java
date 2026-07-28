@@ -14,6 +14,8 @@ import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.usermanager.JahiaUserManagerService;
 
 import javax.jcr.RepositoryException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -124,6 +126,31 @@ public class TaskBoardMutationExtensions {
         // state change, so both writes need to land together in one session.save().
         task.setProperty("finalOutcome", outcome);
         task.setProperty("state", "finished");
+        session.save();
+        return new GqlTaskBoard(task);
+    }
+
+    // Not part of the enum choicelist in definitions.cnd (only active/started/finished/suspended
+    // are), but the legacy task.jsp detail view has always let a plain jnt:task be moved to
+    // "cancelled" directly (with no outcome) alongside the CND-declared states -- preserved here.
+    private static final List<String> ALLOWED_STATES = Arrays.asList("active", "started", "suspended", "finished", "cancelled");
+
+    @GraphQLField
+    @GraphQLDescription("Directly set a task's state (active, started, suspended, finished, cancelled) with no "
+            + "outcome -- the simple suspend/cancel/resume/complete transitions the plain task detail view offers, "
+            + "as opposed to completeTask's outcome-driven workflow completion")
+    public static GqlTaskBoard updateTaskState(
+            @GraphQLName("id") @GraphQLNonNull String id,
+            @GraphQLName("state") @GraphQLNonNull String state) throws RepositoryException {
+        if (!ALLOWED_STATES.contains(state)) {
+            throw new TaskGraphQLException("\"" + state + "\" is not a valid task state");
+        }
+        JCRSessionWrapper session = session();
+        JahiaUser user = requireNonGuest(session);
+        JCRNodeWrapper task = loadTask(session, id);
+        requireCanAct(task, user, session);
+
+        task.setProperty("state", state);
         session.save();
         return new GqlTaskBoard(task);
     }

@@ -9,18 +9,22 @@ const REVIEWER = 'tasks-e2e-reviewer';
 const REVIEWER_PASSWORD = 'password123';
 const TASKS_CONTAINER = `/sites/${TEST_SITE_KEY}/contents/e2e-tasks`;
 
+// Yields the created node's JCR uuid -- assignTaskToMe/unassignTask/suspendTask/completeTask all
+// resolve their "id" argument via session.getNodeByIdentifier(id) server-side, which (per JCR
+// spec) requires a real identifier, not a path. addNode's response shape (data.jcr.addNode.uuid)
+// is confirmed from @jahia/cypress's own addNode.graphql fixture.
 function addTask(name: string, properties: Array<{name: string; value: string; language?: string}>) {
     return addNode({
         parentPathOrId: TASKS_CONTAINER,
         primaryNodeType: 'jnt:task',
         name,
         properties: [{name: 'jcr:title', value: name, language: 'en'}, ...properties]
-    });
+    }).then((response: {data: {jcr: {addNode: {uuid: string}}}}) => response.data.jcr.addNode.uuid);
 }
 
 describe('Task board (taskBoard GraphQL query/mutations behind the React view)', () => {
     before(() => {
-        createSite(TEST_SITE_KEY, {templateSet: TEST_TEMPLATE_SET, locale: 'en'});
+        createSite(TEST_SITE_KEY, {templateSet: TEST_TEMPLATE_SET, serverName: TEST_SITE_KEY, locale: 'en'});
         createUser(REVIEWER, REVIEWER_PASSWORD);
         // editor-in-chief is Jahia's standard role granting "publish" -- confirm against the
         // target instance's role set if the reviewer-path assertions below start failing.
@@ -83,14 +87,14 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
 
         it('"Assign to me": assigns an active, unowned task to the acting user', () => {
             const name = 'action-assign';
-            addTask(name, [{name: 'state', value: 'active'}]);
-
-            cy.apollo({mutationFile: 'graphql/assignTaskToMe.mutation.graphql', variables: {id: `${TASKS_CONTAINER}/${name}`}})
-                .then(({data}) => {
-                    expect(data.assignTaskToMe.state).to.equal('active');
-                    expect(data.assignTaskToMe.owner).to.be.a('string');
-                    expect(data.assignTaskToMe.owner).to.not.equal('');
-                });
+            addTask(name, [{name: 'state', value: 'active'}]).then(id => {
+                cy.apollo({mutationFile: 'graphql/assignTaskToMe.mutation.graphql', variables: {id}})
+                    .then(({data}) => {
+                        expect(data.assignTaskToMe.state).to.equal('active');
+                        expect(data.assignTaskToMe.owner).to.be.a('string');
+                        expect(data.assignTaskToMe.owner).to.not.equal('');
+                    });
+            });
 
             deleteNode(`${TASKS_CONTAINER}/${name}`);
         });
@@ -100,25 +104,25 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
             addTask(name, [
                 {name: 'state', value: 'started'},
                 {name: 'assigneeUserKey', value: 'someone-else'}
-            ]);
-
-            cy.apollo({mutationFile: 'graphql/unassignTask.mutation.graphql', variables: {id: `${TASKS_CONTAINER}/${name}`}})
-                .then(({data}) => {
-                    expect(data.unassignTask.state).to.equal('active');
-                    expect(data.unassignTask.owner).to.equal('');
-                });
+            ]).then(id => {
+                cy.apollo({mutationFile: 'graphql/unassignTask.mutation.graphql', variables: {id}})
+                    .then(({data}) => {
+                        expect(data.unassignTask.state).to.equal('active');
+                        expect(data.unassignTask.owner).to.equal('');
+                    });
+            });
 
             deleteNode(`${TASKS_CONTAINER}/${name}`);
         });
 
         it('"Suspend": moves a started task to suspended', () => {
             const name = 'action-suspend';
-            addTask(name, [{name: 'state', value: 'started'}]);
-
-            cy.apollo({mutationFile: 'graphql/suspendTask.mutation.graphql', variables: {id: `${TASKS_CONTAINER}/${name}`}})
-                .then(({data}) => {
-                    expect(data.suspendTask.state).to.equal('suspended');
-                });
+            addTask(name, [{name: 'state', value: 'started'}]).then(id => {
+                cy.apollo({mutationFile: 'graphql/suspendTask.mutation.graphql', variables: {id}})
+                    .then(({data}) => {
+                        expect(data.suspendTask.state).to.equal('suspended');
+                    });
+            });
 
             deleteNode(`${TASKS_CONTAINER}/${name}`);
         });
@@ -129,13 +133,13 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                 {name: 'state', value: 'started'},
                 {name: 'possibleOutcomes', value: 'publish'},
                 {name: 'possibleOutcomes', value: 'reject'}
-            ]);
-
-            cy.apollo({
-                mutationFile: 'graphql/completeTask.mutation.graphql',
-                variables: {id: `${TASKS_CONTAINER}/${name}`, outcome: 'reject'}
-            }).then(({data}) => {
-                expect(data.completeTask.state).to.equal('finished');
+            ]).then(id => {
+                cy.apollo({
+                    mutationFile: 'graphql/completeTask.mutation.graphql',
+                    variables: {id, outcome: 'reject'}
+                }).then(({data}) => {
+                    expect(data.completeTask.state).to.equal('finished');
+                });
             });
 
             deleteNode(`${TASKS_CONTAINER}/${name}`);

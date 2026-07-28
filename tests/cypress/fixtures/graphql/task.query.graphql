@@ -1,0 +1,13 @@
+query Task($id: String!) {
+    task(id: $id) {
+        id
+        title
+        description
+        priority
+        state
+        owner
+        assigneeDisplayName
+        isAssignableToMe
+        possibleOutcomes
+    }
+}

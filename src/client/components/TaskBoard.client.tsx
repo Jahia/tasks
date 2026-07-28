@@ -2,6 +2,7 @@ import type {MutableRefObject} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Banner, Button, DataTable, EmptyData, Header, Loader, Menu, MenuItem, MoreVert} from '@jahia/moonstone';
 import type {DataTableColumn} from '@jahia/moonstone/DataTable';
+import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
@@ -20,38 +21,6 @@ type TaskBoardProps = {
     currentUserKey: string;
     canReviewAll: boolean;
 };
-
-type GraphQLResponse<T> = {
-    data?: T;
-    errors?: Array<{message: string}>;
-};
-
-async function callGraphQL<T = unknown>(
-    endpoint: string,
-    query: string,
-    variables: Record<string, unknown>
-): Promise<T> {
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query, variables})
-    });
-    if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-    }
-
-    const body = await response.json() as GraphQLResponse<T>;
-    if (body.errors && body.errors.length > 0) {
-        throw new Error(body.errors.map(error => error.message).join('; '));
-    }
-
-    if (!body.data) {
-        throw new Error('GraphQL response contained no data');
-    }
-
-    return body.data;
-}
 
 function capitalize(value: string | null): string {
     if (!value) {

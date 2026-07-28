@@ -15,6 +15,8 @@ public class TaskGraphQLExtensionsProvider implements DXGraphQLExtensionsProvide
 
     @Override
     public Collection<Class<?>> getExtensions() {
-        return Arrays.asList(TaskBoardQueryExtensions.class, TaskBoardMutationExtensions.class);
+        return Arrays.asList(TaskBoardQueryExtensions.class, TaskBoardMutationExtensions.class,
+                TaskDataMutationExtensions.class, TaskListMutationExtensions.class,
+                WorkflowActivityQueryExtensions.class);
     }
 }

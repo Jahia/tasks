@@ -1,0 +1,12 @@
+query WorkflowActivity($path: String!) {
+    workflowActivity(path: $path) {
+        activeTasks {
+            label
+            dueDate
+        }
+        history {
+            label
+            endTime
+        }
+    }
+}

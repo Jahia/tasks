@@ -13,6 +13,7 @@ import org.jahia.modules.graphql.provider.dxm.relay.DXPaginatedDataConnectionFet
 import org.jahia.modules.graphql.provider.dxm.relay.PaginationHelper;
 import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeIteratorWrapper;
+import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.query.QueryWrapper;
@@ -122,6 +123,20 @@ public class TaskBoardQueryExtensions {
                 .map(GqlTaskBoard::new);
 
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
+    }
+
+    @GraphQLField
+    @GraphQLDescription("A single task by id, for the task detail view (jnt:task's own page). Visibility is "
+            + "governed by the normal JCR read permission on the node -- no board-style RBAC scoping applies here, "
+            + "since viewing a task you already have a direct path/id to is a different concern than the "
+            + "aggregated board's owner-scoped listing")
+    public static GqlTaskBoard task(@GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        JCRNodeWrapper node = session.getNodeByIdentifier(id);
+        if (!node.isNodeType("jnt:task")) {
+            throw new TaskGraphQLException("Node " + id + " is not a task");
+        }
+        return new GqlTaskBoard(node);
     }
 
     @GraphQLField

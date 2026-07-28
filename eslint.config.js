@@ -8,7 +8,10 @@ export default tseslint.config(
     // unlinted vendor JS (yarn's bin/lib files) directly under the project root.
     // src/main/** is the Java module's own tree (compiled resources, legacy
     // JSP-era assets like javascript/tasks.js) -- not part of this lint's target.
-    {ignores: ['dist/**', 'node/**', 'src/main/**']},
+    // tests/** is its own package (own package.json/tsconfig, Cypress globals this
+    // config doesn't declare) -- a separate toolchain boundary, same reasoning as
+    // src/main/**, not something this build's lint step should reach into.
+    {ignores: ['dist/**', 'node/**', 'src/main/**', 'tests/**']},
     js.configs.recommended,
     tseslint.configs.recommended,
     {

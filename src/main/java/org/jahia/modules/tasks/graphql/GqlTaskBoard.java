@@ -5,14 +5,21 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNodeImpl;
+import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
+import org.jahia.services.content.JCRSessionFactory;
+import org.jahia.services.content.JCRSessionWrapper;
+import org.jahia.services.usermanager.JahiaUser;
+import org.jahia.services.usermanager.JahiaUserManagerService;
 
 import javax.jcr.ItemNotFoundException;
+import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * One row of the task board GraphQL query -- wraps a {@code jnt:task} or
@@ -83,6 +90,57 @@ public class GqlTaskBoard {
     @GraphQLDescription("Outcomes this task can be completed with (workflow-specific; empty when none are declared)")
     public List<String> getPossibleOutcomes() {
         return readPossibleOutcomes(node);
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Task description")
+    public String getDescription() {
+        return node.getPropertyAsString("description");
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Task priority: low, normal or high")
+    public String getPriority() {
+        return node.getPropertyAsString("priority");
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Display name of the current assignee, resolved from assigneeUserKey; null if unassigned "
+            + "or the key doesn't resolve to a readable user node")
+    public String getAssigneeDisplayName() {
+        String assigneeUserKey = node.getPropertyAsString("assigneeUserKey");
+        if (assigneeUserKey == null || assigneeUserKey.isEmpty()) {
+            return null;
+        }
+        try {
+            return JCRSessionFactory.getInstance().getCurrentUserSession().getNode(assigneeUserKey).getName();
+        } catch (PathNotFoundException e) {
+            // assigneeUserKey isn't a resolvable node path on this provider/version -- fall back to the raw key
+            // rather than erroring, since legacy data may store it in a different format.
+            return assigneeUserKey;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve assignee display name", e);
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Whether the current viewer is eligible to self-assign this task (owner-or-candidate), "
+            + "independent of canReviewAll -- a reviewer can act on any task regardless of candidacy, but "
+            + "\"Assign to me\" for a non-reviewer only makes sense when they're an eligible candidate")
+    public boolean isAssignableToMe() {
+        try {
+            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+            JahiaUser user = session.getUser();
+            if (JahiaUserManagerService.isGuest(user)) {
+                return false;
+            }
+            TaskAuthorizationService authorizationService = Objects.requireNonNull(
+                    BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
+                    "TaskAuthorizationService OSGi service is not available");
+            return authorizationService.isOwnerOrCandidate(node, user);
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve task assignability", e);
+        }
     }
 
     @GraphQLField
