@@ -1,0 +1,6 @@
+mutation SuspendTask($id: String!) {
+    suspendTask(id: $id) {
+        id
+        state
+    }
+}

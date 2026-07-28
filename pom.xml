@@ -51,11 +51,11 @@
         <artifactId>jahia-modules</artifactId>
         <version>8.2.1.0</version>
     </parent>
-    <artifactId>tasks-parent</artifactId>
+    <artifactId>tasks</artifactId>
     <version>8.4.0-SNAPSHOT</version>
-    <packaging>pom</packaging>
-    <name>Jahia Tasks (reactor)</name>
-    <description>Reactor parent for the Jahia Tasks module: the tasks-graphql OSGi bundle (node types, GraphQL, workflow rules) and the tasks-frontend React/Moonstone UI.</description>
+    <packaging>bundle</packaging>
+    <name>Jahia Tasks</name>
+    <description>Jahia template module for leveraging simple user and shared task management, with a React/Moonstone task board view for jnt:currentUserTasks.</description>
     <scm>
         <connection>scm:git:git@github.com:Jahia/tasks.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/tasks.git</developerConnection>
@@ -63,10 +63,14 @@
         <tag>HEAD</tag>
     </scm>
 
-    <modules>
-        <module>tasks-graphql</module>
-        <module>tasks-frontend</module>
-    </modules>
+    <properties>
+        <jahia-depends>default,graphql-dxm-provider</jahia-depends>
+        <export-package>org.jahia.modules.tasks.rules,org.jahia.modules.tasks.graphql</export-package>
+        <jahia-module-type>system</jahia-module-type>
+        <jahia-deploy-on-site>system</jahia-deploy-on-site>
+        <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
+        <jahia-module-signature>MC0CFQCSiYvnmU9n/raHdxUGTyMk9DdUZwIUDgiRGJ/tFKWU3L2GpeqzbI1gLfk=</jahia-module-signature>
+    </properties>
 
     <repositories>
         <repository>
@@ -82,4 +86,163 @@
             <url>https://devtools.jahia.com/nexus/content/groups/public</url>
         </repository>
     </repositories>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>graphql-dxm-provider</artifactId>
+            <version>3.5.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- graphql-dxm-provider declares this itself as "provided", so it does not
+             propagate transitively. Must be declared here too (confirmed by a failed
+             local compile without it). Version picked independently; not verified to be
+             the exact one graphql-dxm-provider:3.5.1 was built against. -->
+        <dependency>
+            <groupId>io.github.graphql-java</groupId>
+            <artifactId>graphql-java-annotations</artifactId>
+            <version>21.5</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <filesets>
+                        <fileset>
+                            <!-- equivalent of 'yarn clean' -->
+                            <directory>${project.basedir}/dist/</directory>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.1</version>
+                <configuration>
+                    <!-- v22.10.0 is too old for eslint-visitor-keys (a transitive
+                         dependency of typescript-eslint), which requires
+                         ^20.19.0 || ^22.13.0 || >=24 -->
+                    <nodeVersion>v22.23.1</nodeVersion>
+                    <yarnVersion>v1.22.22</yarnVersion>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install node and yarn - tasks</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>install-node-and-yarn</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>yarn install - tasks</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>yarn lint - tasks</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>lint</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- Bound to prepare-package (not package) so the Vite build has
+                             produced dist/ before maven-bundle-plugin's package-phase
+                             "bundle" goal folds it into the jar via Include-Resource below. -->
+                        <id>yarn build - tasks</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+                        <!-- Scan for @Component (OSGi Declarative Services) and emit OSGI-INF
+                             descriptors. Without this, @Component classes compile but never
+                             register (see jahia-java-osgi-declarative-services). -->
+                        <_dsannotations>*</_dsannotations>
+                        <!-- bnd's default policy imports these two at [21.5,22) because we
+                             compile against graphql-java-annotations 21.5, but the real
+                             graphql-dxm-provider bundle running in Jahia was built against,
+                             and itself imports at, [21.1,22); confirmed by inspecting its own
+                             MANIFEST.MF. Our narrower default range fails to resolve against
+                             Jahia's actual (older) exported version. Widened to match what is
+                             really running rather than marking the import optional, since
+                             these annotation classes are required at class-load time for our
+                             @GraphQLField-annotated methods; making them optional would trade
+                             this clean install-time failure for a NoClassDefFoundError at
+                             runtime instead. -->
+                        <!-- org.jahia.defaults.config.spring is only referenced by Jahia's own
+                             module Activator (which loads META-INF/spring/*.xml against this
+                             base classpath: resource), never by our own bytecode. bnd's "*"
+                             wildcard only imports packages it can see referenced from class or
+                             resource content, so this needs to be explicit, or the module's
+                             Spring context (the Drools "tasks" global bean) fails to resolve it
+                             at bundle start. -->
+                        <Import-Package>
+                            graphql.annotations.annotationTypes;version="[21.1,22)",
+                            graphql.annotations.connection;version="[21.1,22)",
+                            org.jahia.defaults.config.spring,
+                            *
+                        </Import-Package>
+                        <!-- Fold the built React/Moonstone view (package.json + Vite's dist/
+                             output) into the jar root, alongside the compiled classes, so
+                             javascript-modules-engine can discover it in the same bundle. -->
+                        <Include-Resource>
+                            {maven-resources},
+                            package.json=package.json,
+                            dist=dist
+                        </Include-Resource>
+                    </instructions>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.cyclonedx</groupId>
+                <artifactId>cyclonedx-maven-plugin</artifactId>
+                <version>2.7.11</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>makeAggregateBom</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <projectType>library</projectType>
+                    <schemaVersion>1.4</schemaVersion>
+                    <includeBomSerialNumber>true</includeBomSerialNumber>
+                    <includeCompileScope>true</includeCompileScope>
+                    <includeProvidedScope>false</includeProvidedScope>
+                    <includeRuntimeScope>true</includeRuntimeScope>
+                    <includeSystemScope>false</includeSystemScope>
+                    <includeTestScope>false</includeTestScope>
+                    <includeLicenseText>false</includeLicenseText>
+                    <outputReactorProjects>true</outputReactorProjects>
+                    <outputFormat>json</outputFormat>
+                    <outputName>java-bom.cdx</outputName>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

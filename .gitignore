@@ -4,6 +4,7 @@ target
 .DS_Store
 /.classpath
 /.project
+node
 node_modules
 dist
 *.tgz
