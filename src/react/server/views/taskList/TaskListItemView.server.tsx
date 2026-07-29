@@ -16,7 +16,13 @@ jahiaComponent(
     },
     (props, {currentNode}) => {
         const id = currentNode.getIdentifier();
-        const {data} = useGQLQuery({query: TASK_QUERY, variables: {id}});
+        const {data, errors} = useGQLQuery({query: TASK_QUERY, variables: {id}});
+
+        if (errors && errors.length > 0) {
+            console.error('[tasks] task list row query failed:', errors.map(error => error.message).join('; '));
+            return <div className="task-list-item task-list-item--error">Unable to load this task. Check the server log for details.</div>;
+        }
+
         const result = data as TaskQueryResult;
 
         // taskData sub-view dispatch: a jnt:simpleWorkflow child gets its dedicated view (Phase 1's

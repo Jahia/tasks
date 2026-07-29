@@ -19,10 +19,16 @@ jahiaComponent(
         // buildEndpointUrl are part of @jahia/javascript-modules-library, which
         // the client bundle is forbidden from importing at all. The island
         // fetches every subsequent page/mutation itself via plain fetch().
-        const {data} = useGQLQuery({
+        const {data, errors} = useGQLQuery({
             query: INITIAL_TASK_BOARD_QUERY,
             variables: {first: PAGE_SIZE}
         });
+
+        if (errors && errors.length > 0) {
+            console.error('[tasks] currentUserTasks board query failed:', errors.map(error => error.message).join('; '));
+            return <div className="task-board task-board--error">Unable to load the task board. Check the server log for details.</div>;
+        }
+
         const result = data as InitialTaskBoardQueryResult;
 
         return (

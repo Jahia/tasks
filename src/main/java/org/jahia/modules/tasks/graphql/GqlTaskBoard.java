@@ -3,6 +3,7 @@ package org.jahia.modules.tasks.graphql;
 import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNodeImpl;
 import org.jahia.osgi.BundleUtils;
@@ -113,7 +114,8 @@ public class GqlTaskBoard {
             return null;
         }
         try {
-            return JCRSessionFactory.getInstance().getCurrentUserSession().getNode(assigneeUserKey).getName();
+            return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
+                    .getNode(assigneeUserKey).getName();
         } catch (PathNotFoundException e) {
             // assigneeUserKey isn't a resolvable node path on this provider/version -- fall back to the raw key
             // rather than erroring, since legacy data may store it in a different format.
@@ -129,7 +131,7 @@ public class GqlTaskBoard {
             + "\"Assign to me\" for a non-reviewer only makes sense when they're an eligible candidate")
     public boolean isAssignableToMe() {
         try {
-            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
             JahiaUser user = session.getUser();
             if (JahiaUserManagerService.isGuest(user)) {
                 return false;

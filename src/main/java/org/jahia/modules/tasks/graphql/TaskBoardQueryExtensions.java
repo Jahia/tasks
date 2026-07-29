@@ -7,6 +7,7 @@ import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import graphql.annotations.connection.GraphQLConnection;
 import graphql.schema.DataFetchingEnvironment;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.modules.graphql.provider.dxm.relay.DXPaginatedData;
 import org.jahia.modules.graphql.provider.dxm.relay.DXPaginatedDataConnectionFetcher;
@@ -40,6 +41,14 @@ import java.util.stream.StreamSupport;
  * <p>TODO(Phase 4): scoped to the whole repository for now (no site/path filter);
  * revisit once the per-site visibility story for jnt:workflowTask is confirmed
  * against a real deployment.
+ *
+ * <p>Every query here explicitly targets {@link Constants#EDIT_WORKSPACE} rather than using
+ * whatever workspace the ambient rendering session happens to be in: jnt:task/jnt:workflowTask
+ * data is operational content that only ever lives in the edit/default workspace, never
+ * published to live (this is exactly what the legacy JSPs' own {@code currentResource.workspace
+ * eq 'live'} branches worked around, by redirecting to a preview/edit-workspace fetch instead of
+ * querying directly). A board rendered from a "live" session context would otherwise silently
+ * return zero tasks even though they exist.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
 public class TaskBoardQueryExtensions {
@@ -63,7 +72,7 @@ public class TaskBoardQueryExtensions {
             List<String> filterState,
             DataFetchingEnvironment environment) throws RepositoryException {
 
-        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
         JahiaUser user = session.getUser();
         PaginationHelper.Arguments paginationArguments = PaginationHelper.parseArguments(environment);
 
@@ -131,7 +140,7 @@ public class TaskBoardQueryExtensions {
             + "since viewing a task you already have a direct path/id to is a different concern than the "
             + "aggregated board's owner-scoped listing")
     public static GqlTaskBoard task(@GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
-        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
         JCRNodeWrapper node = session.getNodeByIdentifier(id);
         if (!node.isNodeType("jnt:task")) {
             throw new TaskGraphQLException("Node " + id + " is not a task");
@@ -144,14 +153,14 @@ public class TaskBoardQueryExtensions {
     @GraphQLDescription("The current viewer's user key. Client-side UI uses this to decide which row actions to "
             + "show; every mutation independently re-checks authorization server-side regardless of this value.")
     public static String taskBoardCurrentUserKey() throws RepositoryException {
-        return JCRSessionFactory.getInstance().getCurrentUserSession().getUser().getUserKey();
+        return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE).getUser().getUserKey();
     }
 
     @GraphQLField
     @GraphQLNonNull
     @GraphQLDescription("Whether the current viewer can act on every task on the board, not just their own")
     public static boolean taskBoardCanReviewAll() throws RepositoryException {
-        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
         TaskAuthorizationService authorizationService = Objects.requireNonNull(
                 BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
                 "TaskAuthorizationService OSGi service is not available");

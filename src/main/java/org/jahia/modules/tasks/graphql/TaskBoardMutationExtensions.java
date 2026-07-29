@@ -5,6 +5,7 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
@@ -155,8 +156,13 @@ public class TaskBoardMutationExtensions {
         return new GqlTaskBoard(task);
     }
 
+    // jnt:task/jnt:workflowTask data is operational content that only ever lives in the
+    // edit/default workspace, never published to live -- pinned explicitly so these mutations
+    // work correctly regardless of which workspace the ambient rendering context happens to be
+    // using (e.g. a "live" dashboard iframe), instead of silently operating against a session
+    // where the target node doesn't exist.
     private static JCRSessionWrapper session() throws RepositoryException {
-        return JCRSessionFactory.getInstance().getCurrentUserSession();
+        return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
     }
 
     private static JahiaUser requireNonGuest(JCRSessionWrapper session) {

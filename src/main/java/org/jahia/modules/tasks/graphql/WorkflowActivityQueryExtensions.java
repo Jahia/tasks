@@ -5,6 +5,7 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.workflow.HistoryWorkflow;
@@ -42,7 +43,10 @@ public class WorkflowActivityQueryExtensions {
             + "workflow process tracked under path: active due-dated tasks and completed task history")
     public static GqlWorkflowActivity workflowActivity(
             @GraphQLName("path") @GraphQLNonNull String path) throws RepositoryException {
-        Locale locale = JCRSessionFactory.getInstance().getCurrentUserSession().getLocale();
+        // Only the locale is read off this session (WorkflowService's own API takes the path/id
+        // args directly) -- pinned to the edit workspace for consistency with every other query
+        // in this module; see TaskBoardQueryExtensions' class comment for why.
+        Locale locale = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE).getLocale();
         WorkflowService workflowService = WorkflowService.getInstance();
 
         List<GqlWorkflowActivityTask> activeTasks = new ArrayList<>();

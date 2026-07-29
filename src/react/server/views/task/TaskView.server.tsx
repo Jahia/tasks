@@ -18,10 +18,16 @@ jahiaComponent(
         // whether the state-transition buttons show at all is a UX nicety; updateTaskState
         // independently re-checks authorization server-side regardless of this value.
         const canModify = currentNode.hasPermission('jcr:modifyProperties');
-        const {data} = useGQLQuery({
+        const {data, errors} = useGQLQuery({
             query: TASK_QUERY,
             variables: {id}
         });
+
+        if (errors && errors.length > 0) {
+            console.error('[tasks] task detail query failed:', errors.map(error => error.message).join('; '));
+            return <div className="task-detail task-detail--error">Unable to load this task. Check the server log for details.</div>;
+        }
+
         const result = data as TaskQueryResult;
 
         return (

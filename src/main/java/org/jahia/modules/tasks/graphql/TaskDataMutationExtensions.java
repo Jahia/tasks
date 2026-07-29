@@ -5,6 +5,7 @@ import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNodeImpl;
@@ -30,7 +31,9 @@ public class TaskDataMutationExtensions {
     public static GqlJcrNode updateTaskDataTitle(
             @GraphQLName("id") @GraphQLNonNull String id,
             @GraphQLName("title") @GraphQLNonNull String title) throws RepositoryException {
-        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession();
+        // taskData nodes only ever live in the edit/default workspace -- see
+        // TaskBoardQueryExtensions' class comment for why this is pinned explicitly.
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
         if (JahiaUserManagerService.isGuest(session.getUser())) {
             throw new TaskGraphQLException("You must be logged in to edit this task");
         }

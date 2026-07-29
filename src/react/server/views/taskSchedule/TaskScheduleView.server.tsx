@@ -89,7 +89,7 @@ jahiaComponent(
             }`)
             .join('\n');
 
-        const {data} = useGQLQuery({
+        const {data, errors} = useGQLQuery({
             query: `
                 query TaskSchedule($workflowPath: String!) {
                     ${taskFieldsQuery}
@@ -102,6 +102,12 @@ jahiaComponent(
             `,
             variables: {workflowPath: mainNode.getPath()}
         });
+
+        if (errors && errors.length > 0) {
+            console.error('[tasks] task schedule query failed:', errors.map(error => error.message).join('; '));
+            return <div className="task-schedule task-schedule--error">Unable to load the task schedule. Check the server log for details.</div>;
+        }
+
         const result = data as ScheduleQueryResult;
 
         const entries: ScheduleEntry[] = [];

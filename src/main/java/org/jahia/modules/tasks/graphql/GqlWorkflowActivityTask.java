@@ -2,6 +2,7 @@ package org.jahia.modules.tasks.graphql;
 
 import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
+import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNodeImpl;
 import org.jahia.services.content.JCRNodeWrapper;
@@ -58,7 +59,8 @@ public class GqlWorkflowActivityTask {
             return null;
         }
         try {
-            JCRNodeWrapper node = JCRSessionFactory.getInstance().getCurrentUserSession().getNodeByIdentifier(targetNodeId);
+            JCRNodeWrapper node = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
+                    .getNodeByIdentifier(targetNodeId);
             return new GqlJcrNodeImpl(node);
         } catch (ItemNotFoundException e) {
             return null;
