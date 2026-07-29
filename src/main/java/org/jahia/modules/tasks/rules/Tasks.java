@@ -83,6 +83,51 @@ public class Tasks {
         return instance;
     }
 
+    /**
+     * Materializes the "My tasks" dashboard tile's default content directly onto a user node.
+     * The "tasks" contentTemplate's own default pagecontent (see src/main/import/repository.xml)
+     * is never inherited onto the live /users/&lt;username&gt; node the way a jnt:page inherits its
+     * template's default area content -- the dashboard iframe just renders "No item found" instead.
+     * Idempotent: skips users that already have this content (e.g. re-running after a manual edit).
+     */
+    public void materializeDashboardTile(AddedNodeFact node) {
+        try {
+            materializeDashboardTile(node.getNode());
+        } catch (RepositoryException e) {
+            logger.error("Cannot materialize the tasks dashboard tile for new user node", e);
+        }
+    }
+
+    /**
+     * @return true if the tile's content was just created, false if the user node already had it
+     *         (also used by {@link ExistingUserDashboardTileMigration} to backfill users that
+     *         predate this rule, so it needs to be visible outside this class).
+     */
+    boolean materializeDashboardTile(JCRNodeWrapper userNode) throws RepositoryException {
+        if (userNode.hasNode("pagecontent/my-tasks/currentUserTasks")) {
+            return false;
+        }
+
+        JCRNodeWrapper pagecontent = userNode.hasNode("pagecontent")
+                ? userNode.getNode("pagecontent")
+                : userNode.addNode("pagecontent", "jnt:contentList");
+        JCRNodeWrapper myTasks = pagecontent.hasNode("my-tasks")
+                ? pagecontent.getNode("my-tasks")
+                : pagecontent.addNode("my-tasks", "jnt:contentList");
+
+        // Mirrors the "tasks" contentTemplate's own default currentUserTasks node
+        // (src/main/import/repository.xml) -- keep the two in sync if either changes.
+        JCRNodeWrapper currentUserTasks = myTasks.addNode("currentUserTasks", "jnt:currentUserTasks");
+        currentUserTasks.addMixin("jmix:renderable");
+        currentUserTasks.setProperty("displayAssignee", true);
+        currentUserTasks.setProperty("displayCreator", true);
+        currentUserTasks.setProperty("displayState", true);
+        currentUserTasks.setProperty("filterOnAssignee", "assignedToMeOrUnassigned");
+        currentUserTasks.setProperty("filterOnStates", new String[]{"active", "started", "suspended"});
+        currentUserTasks.setProperty("sortBy", "jcr:created");
+        return true;
+    }
+
     public void assignTask(AddedNodeFact node, String username) {
         JCRUserNode user = ServicesRegistry.getInstance().getJahiaUserManagerService().lookupUserByPath(username);
         try {

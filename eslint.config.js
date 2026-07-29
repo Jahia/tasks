@@ -11,7 +11,7 @@ export default tseslint.config(
     // tests/** is its own package (own package.json/tsconfig, Cypress globals this
     // config doesn't declare) -- a separate toolchain boundary, same reasoning as
     // src/main/**, not something this build's lint step should reach into.
-    {ignores: ['dist/**', 'node/**', 'src/main/**', 'tests/**']},
+    {ignores: ['dist/**', 'node/**', 'src/main/**', 'target/**', 'tests/**']},
     js.configs.recommended,
     tseslint.configs.recommended,
     {

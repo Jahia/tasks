@@ -47,6 +47,16 @@ rule "A task has been created"
 end
 */
 
+rule "The tasks dashboard tile is materialized for a new user"
+    when
+        A new node is created
+		- the node has the type jnt:user
+		- its name is not guest
+    then
+        Log "Materializing the tasks dashboard tile for new user: " + node.getName()
+>       tasks.materializeDashboardTile(node);
+end
+
 rule "A workflow task has been assigned"
     when
         Not in operation import
