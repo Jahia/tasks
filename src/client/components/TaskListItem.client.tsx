@@ -85,6 +85,34 @@ export default function TaskListItem({task: initialTask, currentUserKey, canRevi
         actions.push({label: 'Continue', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'started'}});
     }
 
+    // Menu requires each top-level child to be a single MenuItem element -- its internal
+    // auto-search-threshold check (Menu.tsx) does `children[0].props[...]`, which throws if
+    // children[0] is itself an array (e.g. the direct result of actions.map(...) placed
+    // alongside a sibling JSX expression). Building one flat array up front, instead of a
+    // ternary/&& mix of JSX expressions as Menu's children, keeps every child a plain element.
+    const menuItems = actions.length === 0
+        ? [<MenuItem key="none" label="No actions available" isDisabled/>]
+        : actions.map((action, index) => (
+            <MenuItem
+                key={`${index}-${action.label}`}
+                label={action.label}
+                onClick={() => runAction(action)}
+            />
+        ));
+
+    if (task.targetNode?.url) {
+        menuItems.push(
+            <MenuItem
+                key="preview"
+                label="Preview"
+                onClick={() => {
+                    setMenuOpen(false);
+                    window.open(task.targetNode!.url, '_blank', 'noopener,noreferrer');
+                }}
+            />
+        );
+    }
+
     return (
         <div className="task-list-item__row">
             {error && (
@@ -110,27 +138,7 @@ export default function TaskListItem({task: initialTask, currentUserKey, canRevi
                 anchorEl={anchorRef as MutableRefObject<HTMLDivElement>}
                 onClose={() => setMenuOpen(false)}
             >
-                {actions.length === 0 ? (
-                    <MenuItem label="No actions available" isDisabled/>
-                ) : (
-                    actions.map((action, index) => (
-                        <MenuItem
-                            key={`${index}-${action.label}`}
-                            label={action.label}
-                            onClick={() => runAction(action)}
-                        />
-                    ))
-                )}
-                {task.targetNode?.url && (
-                    <MenuItem
-                        key="preview"
-                        label="Preview"
-                        onClick={() => {
-                            setMenuOpen(false);
-                            window.open(task.targetNode!.url, '_blank', 'noopener,noreferrer');
-                        }}
-                    />
-                )}
+                {menuItems}
             </Menu>
         </div>
     );

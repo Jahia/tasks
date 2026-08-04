@@ -17,10 +17,12 @@ type LoadState =
     | {status: 'ready'; data: InitialTaskBoardQueryResult};
 
 /**
- * Entry point rendered by the 'tasksDashboard' route (see ../javascript/init.tsx). Unlike
- * CurrentUserTasksView.server.tsx (the jnt:currentUserTasks content view, SSR-fetched), this
- * route is mounted directly by the admin shell with no server-side render pass, so it fetches
- * its own initial page here instead of receiving it as a prop.
+ * Entry point for the 'tasks' adminRoute (see ../javascript/init.tsx), which overrides
+ * jahia-dashboard's own built-in 'tasks' dashboard tab (normally an iframe onto the
+ * jnt:user 'tasks' content template -- see init.tsx for why that never renders any content).
+ * Unlike CurrentUserTasksView.server.tsx (the jnt:currentUserTasks content view, SSR-fetched),
+ * this route is mounted directly by the admin shell with no server-side render pass, so it
+ * fetches its own initial page here instead of receiving it as a prop.
  */
 export function TasksDashboardApp() {
     const [state, setState] = useState<LoadState>({status: 'loading'});

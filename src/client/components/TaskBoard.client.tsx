@@ -98,6 +98,37 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
         actions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
     }
 
+    // Menu requires each top-level child to be a single MenuItem element -- its internal
+    // auto-search-threshold check (Menu.tsx) does `children[0].props[...]`, which throws if
+    // children[0] is itself an array (e.g. the direct result of actions.map(...) placed
+    // alongside a sibling JSX expression). Building one flat array up front, instead of a
+    // ternary/&& mix of JSX expressions as Menu's children, keeps every child a plain element.
+    const menuItems = actions.length === 0
+        ? [<MenuItem key="none" label="No actions available" isDisabled/>]
+        : actions.map((action, index) => (
+            <MenuItem
+                key={`${index}-${action.label}`}
+                label={action.label}
+                onClick={() => {
+                    setMenuOpen(false);
+                    onAction(action.mutation, action.variables);
+                }}
+            />
+        ));
+
+    if (targetUrl) {
+        menuItems.push(
+            <MenuItem
+                key="preview"
+                label="Preview"
+                onClick={() => {
+                    setMenuOpen(false);
+                    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                }}
+            />
+        );
+    }
+
     return (
         <>
             <div ref={anchorRef}>
@@ -115,30 +146,7 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
                 anchorEl={anchorRef as MutableRefObject<HTMLDivElement>}
                 onClose={() => setMenuOpen(false)}
             >
-                {actions.length === 0 ? (
-                    <MenuItem label="No actions available" isDisabled/>
-                ) : (
-                    actions.map((action, index) => (
-                        <MenuItem
-                            key={`${index}-${action.label}`}
-                            label={action.label}
-                            onClick={() => {
-                                setMenuOpen(false);
-                                onAction(action.mutation, action.variables);
-                            }}
-                        />
-                    ))
-                )}
-                {targetUrl && (
-                    <MenuItem
-                        key="preview"
-                        label="Preview"
-                        onClick={() => {
-                            setMenuOpen(false);
-                            window.open(targetUrl, '_blank', 'noopener,noreferrer');
-                        }}
-                    />
-                )}
+                {menuItems}
             </Menu>
         </>
     );
@@ -246,7 +254,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     return (
         <div className="task-board__layout">
             <Header title="Tasks"/>
-            <div className="task-board__toolbar">{connection.totalCount} task(s)</div>
+            <div className="task-board__toolbar">{connection.pageInfo.totalCount} task(s)</div>
             {error && (
                 <Banner title="Something went wrong" variant="danger">
                     {error}
@@ -264,7 +272,8 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                     enablePagination
                     currentPage={currentPage}
                     itemsPerPage={PAGE_SIZE}
-                    totalItems={connection.totalCount}
+                    itemsPerPageOptions={[PAGE_SIZE]}
+                    totalItems={connection.pageInfo.totalCount}
                     onPageChange={handlePageChange}
                 />
             )}

@@ -11,10 +11,10 @@
 export const TASK_BOARD_QUERY = /* GraphQL */ `
     query TaskBoard($first: Int!, $after: String) {
         taskBoard(first: $first, after: $after) {
-            totalCount
             pageInfo {
                 hasNextPage
                 endCursor
+                totalCount
             }
             edges {
                 node {
@@ -39,10 +39,10 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
     query InitialTaskBoard($first: Int!) {
         taskBoard(first: $first) {
-            totalCount
             pageInfo {
                 hasNextPage
                 endCursor
+                totalCount
             }
             edges {
                 node {
@@ -114,10 +114,10 @@ export type TaskBoardNode = {
 };
 
 export type TaskBoardConnection = {
-    totalCount: number;
     pageInfo: {
         hasNextPage: boolean;
         endCursor: string | null;
+        totalCount: number;
     };
     edges: Array<{node: TaskBoardNode}>;
 };
