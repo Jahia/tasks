@@ -22,6 +22,7 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     title
                     creator
                     owner
+                    assigneeDisplayName
                     state
                     possibleOutcomes
                     targetNode {
@@ -50,6 +51,7 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     title
                     creator
                     owner
+                    assigneeDisplayName
                     state
                     possibleOutcomes
                     targetNode {
@@ -108,6 +110,7 @@ export type TaskBoardNode = {
     title: string | null;
     creator: string | null;
     owner: string | null;
+    assigneeDisplayName: string | null;
     state: string | null;
     possibleOutcomes: string[];
     targetNode: {url: string} | null;

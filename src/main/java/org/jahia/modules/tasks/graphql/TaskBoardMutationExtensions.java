@@ -52,6 +52,11 @@ public class TaskBoardMutationExtensions {
         }
 
         task.setProperty("assigneeUserKey", user.getUserKey());
+        // Assigning is what moves a task from the unassigned pool into someone's active work --
+        // the state must flip to "started" here, or the task stays "active" despite already
+        // having an owner, which is the state the rest of this class (suspendTask, completeTask,
+        // and unassignTask's own revert-to-active) treats as "not yet picked up by anyone".
+        task.setProperty("state", "started");
         session.save();
         return new GqlTaskBoard(task);
     }

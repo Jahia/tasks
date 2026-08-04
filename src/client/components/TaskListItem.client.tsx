@@ -1,6 +1,6 @@
 import type {MutableRefObject} from 'react';
 import {useCallback, useRef, useState} from 'react';
-import {Banner, Button, Menu, MenuItem, MoreVert} from '@jahia/moonstone';
+import {Add, Banner, Button, Close, Menu, MenuItem} from '@jahia/moonstone';
 import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
@@ -125,12 +125,12 @@ export default function TaskListItem({task: initialTask, currentUserKey, canRevi
             {task.state === 'finished' && <p className="task-list-item__completed">Completed</p>}
             <div ref={anchorRef}>
                 <Button
-                    icon={<MoreVert/>}
-                    variant="ghost"
+                    icon={isMenuOpen ? <Close/> : <Add/>}
+                    variant={isMenuOpen ? 'default' : 'ghost'}
                     size="small"
                     isDisabled={isBusy}
-                    aria-label="Task actions"
-                    onClick={() => setMenuOpen(true)}
+                    aria-label={isMenuOpen ? 'Hide task actions' : 'Show task actions'}
+                    onClick={() => setMenuOpen(open => !open)}
                 />
             </div>
             <Menu

@@ -199,10 +199,21 @@
                              resource content, so this needs to be explicit, or the module's
                              Spring context (the Drools "tasks" global bean) fails to resolve it
                              at bundle start. -->
+                        <!-- org.jahia.utils.i18n (Messages, JahiaLocaleContextHolder), used by
+                             GqlTaskBoard#getTitle() to resolve the "##resourceBundle(...)##"
+                             macro, IS referenced from our own bytecode, but bnd's "*" wildcard
+                             still didn't pick it up (confirmed missing from the built MANIFEST.MF's
+                             Import-Package). Without it, the classes fail to load when
+                             graphql-dxm-provider reflects over GqlTaskBoard to build the schema,
+                             and it silently drops the whole taskBoard field rather than erroring;
+                             the exact same failure mode as the two imports above, just discovered
+                             the hard way (a live "field 'taskBoard' is not defined" instead of an
+                             install-time or class-load error). -->
                         <Import-Package>
                             graphql.annotations.annotationTypes;version="[21.1,22)",
                             graphql.annotations.connection;version="[21.1,22)",
                             org.jahia.defaults.config.spring,
+                            org.jahia.utils.i18n,
                             *
                         </Import-Package>
                         <!-- Fold the built React/Moonstone view (package.json + Vite's dist/

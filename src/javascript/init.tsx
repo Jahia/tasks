@@ -2,6 +2,12 @@ import {registry} from '@jahia/ui-extender';
 import {Task} from '@jahia/moonstone';
 import {TasksDashboardApp} from './TasksDashboardApp';
 
+// window.jahia.i18n is set up by the app shell before any remote's init() runs (see e.g.
+// personal-api-tokens' own init.js), but @jahia/ui-extender's own Window.jahia type declares
+// only { ui: {...} } (see its IframeRenderer.d.ts) -- re-declaring the global here to add
+// i18n would conflict with that existing declaration, so this casts locally instead.
+const jahiaGlobal = window as unknown as {jahia?: {i18n?: {loadNamespaces: (namespace: string) => void}}};
+
 // jahia-dashboard's own built-in 'tasks' adminRoute (dashboard:50, see
 // jahia-dashboard/src/javascript/Dashboard/Dashboard.adminRoute.jsx) iframes to
 // <userpath>.tasks.html -- i.e. it renders /users/<user> through the 'tasks' jnt:contentTemplate
@@ -32,13 +38,22 @@ import {TasksDashboardApp} from './TasksDashboardApp';
 // was dead code: type 'route' is only ever consumed for 'main:N' targets by jahia-dashboard's own
 // routeDashboard registration -- 'dashboard:N' targets are read exclusively as type 'adminRoute'.)
 export default function () {
+    // The namespace here IS the URL segment app-shell's i18next backend fetches from
+    // (loadPath in app-shell's i18n.js: `/modules/${namespace}/javascript/locales/${lang}.json`,
+    // see e.g. personal-api-tokens' own locales/en.json at that exact module-relative path) --
+    // it has to be this module's own name ("tasks"), not the Java-side resource bundle's base
+    // name ("JahiaTasks", used only by server-rendered JSPs/.properties files, a separate,
+    // unrelated i18n system). Resolves the label below via src/main/resources/javascript/
+    // locales/{en,de,fr}.json.
+    jahiaGlobal.jahia?.i18n?.loadNamespaces('tasks');
+
     registry.add('callback', 'TasksEngineEditor', {
         targets: ['jahiaApp-init:6'],
         callback: () => {
             registry.addOrReplace('adminRoute', 'tasks', {
                 targets: ['dashboard:50'],
                 icon: <Task/>,
-                label: 'JahiaTasks:jnt_task.myTasks',
+                label: 'tasks:jnt_task.myTasks',
                 isSelectable: true,
                 render: () => <TasksDashboardApp/>
             });

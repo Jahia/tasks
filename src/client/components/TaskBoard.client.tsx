@@ -1,6 +1,6 @@
 import type {MutableRefObject} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Banner, Button, DataTable, EmptyData, Header, Loader, Menu, MenuItem, MoreVert} from '@jahia/moonstone';
+import {Add, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Loader, Menu, MenuItem, Typography} from '@jahia/moonstone';
 import type {DataTableColumn} from '@jahia/moonstone/DataTable';
 import {callGraphQL} from '../lib/graphqlClient';
 import {
@@ -29,6 +29,16 @@ function capitalize(value: string | null): string {
 
     return value.charAt(0).toUpperCase() + value.slice(1);
 }
+
+type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
+
+// active: ready to be picked up. started: in progress. suspended: parked. finished: done.
+const STATE_CHIP_COLOR: Record<string, ChipColor> = {
+    active: 'accent',
+    started: 'warning',
+    suspended: 'light',
+    finished: 'success'
+};
 
 // One button per outcome the task actually declares (workflow-specific --
 // see TaskBoardMutationExtensions#completeTask). Common synonyms get the
@@ -133,12 +143,12 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
         <>
             <div ref={anchorRef}>
                 <Button
-                    icon={<MoreVert/>}
-                    variant="ghost"
+                    icon={isMenuOpen ? <Close/> : <Add/>}
+                    variant={isMenuOpen ? 'default' : 'ghost'}
                     size="small"
                     isDisabled={isBusy}
-                    aria-label="Task actions"
-                    onClick={() => setMenuOpen(true)}
+                    aria-label={isMenuOpen ? 'Hide task actions' : 'Show task actions'}
+                    onClick={() => setMenuOpen(open => !open)}
                 />
             </div>
             <Menu
@@ -216,22 +226,28 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
             // DataTableColumn's `value` type is the union of every column's
             // property type on T, not just this column's -- these four are
             // all known to be `string | null` on TaskBoardNode.
-            render: ({value}) => (value as string | null) ?? 'Untitled task'
+            render: ({value}) => <Typography weight="semiBold">{(value as string | null) ?? 'Untitled task'}</Typography>
         },
         {
             key: 'creator',
             label: 'Creator',
-            render: ({value}) => (value as string | null) ?? '—'
+            render: ({value}) => <Typography variant="body">{(value as string | null) ?? '—'}</Typography>
         },
         {
             key: 'owner',
             label: 'Owner',
-            render: ({value}) => (value as string | null) ?? 'Unassigned'
+            // owner itself is the raw assigneeUserKey (a JCR path, e.g. /users/jb/ac/eh/irina) --
+            // it stays the column's `key` because that's what canAct/canReviewAll logic compares
+            // against, but the cell displays assigneeDisplayName (just the user node's name).
+            render: ({data}) => <Typography variant="body">{data.assigneeDisplayName ?? 'Unassigned'}</Typography>
         },
         {
             key: 'state',
             label: 'State',
-            render: ({value}) => capitalize(value as string | null)
+            render: ({value}) => {
+                const state = value as string | null;
+                return <Chip label={capitalize(state)} color={(state && STATE_CHIP_COLOR[state]) || 'default'}/>;
+            }
         },
         {
             key: 'id',
@@ -254,7 +270,9 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     return (
         <div className="task-board__layout">
             <Header title="Tasks"/>
-            <div className="task-board__toolbar">{connection.pageInfo.totalCount} task(s)</div>
+            <div className="task-board__toolbar">
+                <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
+            </div>
             {error && (
                 <Banner title="Something went wrong" variant="danger">
                     {error}

@@ -12,6 +12,8 @@ import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.usermanager.JahiaUserManagerService;
+import org.jahia.utils.i18n.JahiaLocaleContextHolder;
+import org.jahia.utils.i18n.Messages;
 
 import javax.jcr.ItemNotFoundException;
 import javax.jcr.PathNotFoundException;
@@ -20,7 +22,10 @@ import javax.jcr.Value;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * One row of the task board GraphQL query -- wraps a {@code jnt:task} or
@@ -29,6 +34,11 @@ import java.util.Objects;
  */
 @GraphQLDescription("A row of the task board: a jnt:task or jnt:workflowTask node")
 public class GqlTaskBoard {
+
+    // Deliberately narrower than core's Messages#RB_MACRO: that pattern is only ever matched
+    // with Matcher#matches() (whole-input), so it can't be reused as-is against our titles,
+    // which embed the macro followed by literal text (see getTitle()'s javadoc below).
+    private static final Pattern RESOURCE_BUNDLE_MACRO = Pattern.compile("##resourceBundle\\([^\"#]*\\)##");
 
     private final JCRNodeWrapper node;
 
@@ -50,7 +60,31 @@ public class GqlTaskBoard {
     @GraphQLField
     @GraphQLDescription("Task title")
     public String getTitle() {
-        return node.getPropertyAsString("jcr:title");
+        // Workflow-created tasks store jcr:title as "##resourceBundle(key,bundle)## : <page name>"
+        // (see core's JBPMTaskLifeCycleEventListener -- key is the workflow step, e.g. "review";
+        // the suffix after "##" is the target content's display name, appended as literal text,
+        // not part of the macro). Core's own Messages#interpolateResourceBundleMacro only resolves
+        // a macro that is the ENTIRE input (it matches with Matcher#matches()), so it can't be
+        // called on this title directly -- it would just return it unchanged, macro and all. This
+        // extracts just the "##resourceBundle(...)##" substring, resolves that through the same
+        // core utility, and splices the result back into the surrounding literal text. Plain
+        // jnt:task titles (no macro at all) pass through unchanged.
+        String title = node.getPropertyAsString("jcr:title");
+        if (title == null) {
+            return null;
+        }
+        Matcher matcher = RESOURCE_BUNDLE_MACRO.matcher(title);
+        if (!matcher.find()) {
+            return title;
+        }
+        try {
+            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
+            Locale locale = session.getLocale() != null ? session.getLocale() : JahiaLocaleContextHolder.getLocale();
+            String resolvedMacro = Messages.interpolateResourceBundleMacro(matcher.group(), locale, null);
+            return title.substring(0, matcher.start()) + resolvedMacro + title.substring(matcher.end());
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve task title", e);
+        }
     }
 
     @GraphQLField
