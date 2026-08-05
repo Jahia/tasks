@@ -180,18 +180,51 @@ public class GqlTaskBoard {
     }
 
     @GraphQLField
-    @GraphQLDescription("The content node this task is about (e.g. a page pending publication), if any")
+    @GraphQLDescription("The page this task is about (e.g. a page pending publication), if any -- resolved to the "
+            + "nearest containing page when the workflow's actual target is a sub-node within one (an area's "
+            + "content item, e.g. a slider slide or a news entry), since only pages have their own renderable URL")
     public GqlJcrNode getTargetNode() {
         try {
             if (!node.hasProperty("targetNode")) {
                 return null;
             }
-            return new GqlJcrNodeImpl((JCRNodeWrapper) node.getProperty("targetNode").getNode());
+            JCRNodeWrapper target = (JCRNodeWrapper) node.getProperty("targetNode").getNode();
+            JCRNodeWrapper renderable = isRenderablePage(target) ? target : findContainingPage(target);
+            if (renderable == null) {
+                renderable = target;
+            }
+            // Re-resolved through a session with an explicit locale: this class's own session
+            // (opened without one, see TaskBoardQueryExtensions) makes GqlJcrNodeImpl#getUrl()
+            // embed a literal "null" in place of the language segment (the exact same missing-
+            // locale issue getTitle() above works around, just surfacing in core's URL builder
+            // instead of ours).
+            JCRSessionWrapper localizedSession = JCRSessionFactory.getInstance()
+                    .getCurrentUserSession(Constants.EDIT_WORKSPACE, JahiaLocaleContextHolder.getLocale());
+            return new GqlJcrNodeImpl((JCRNodeWrapper) localizedSession.getNodeByIdentifier(renderable.getIdentifier()));
         } catch (ItemNotFoundException e) {
             // Weak reference target no longer exists.
             return null;
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve task target node", e);
+        }
+    }
+
+    private static boolean isRenderablePage(JCRNodeWrapper node) throws RepositoryException {
+        return node.isNodeType("jnt:page") || node.isNodeType("jmix:mainResource");
+    }
+
+    // Same walk-up-to-the-nearest-page pattern as core's own NavigationHelper#lookUpParentPageNode
+    // (private there, so reimplemented here rather than depended on).
+    private static JCRNodeWrapper findContainingPage(JCRNodeWrapper node) throws RepositoryException {
+        JCRNodeWrapper parent = node.getParent();
+        while (true) {
+            if (isRenderablePage(parent)) {
+                return parent;
+            }
+            if ("/".equals(parent.getPath())) {
+                return null;
+            }
+            parent = parent.getParent();
         }
     }
 

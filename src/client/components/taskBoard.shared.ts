@@ -9,8 +9,8 @@
  */
 
 export const TASK_BOARD_QUERY = /* GraphQL */ `
-    query TaskBoard($first: Int!, $after: String) {
-        taskBoard(first: $first, after: $after) {
+    query TaskBoard($first: Int!, $after: String, $search: String) {
+        taskBoard(first: $first, after: $after, search: $search) {
             pageInfo {
                 hasNextPage
                 endCursor

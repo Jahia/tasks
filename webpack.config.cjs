@@ -11,8 +11,14 @@ module.exports = (env, argv) => {
         output: {
             path: path.resolve(__dirname, 'src/main/resources/javascript/apps/'),
             filename: 'tasks.bundle.js',
-            chunkFilename: '[name].tasks.[chunkhash:6].js',
-            clean: true
+            chunkFilename: '[name].tasks.[chunkhash:6].js'
+            // No `clean: true`: on a Windows dev box with an on-access endpoint-security scanner
+            // (e.g. Kaspersky-style real-time protection), webpack's clean step tries to unlink
+            // the previous build's now-stale content-hashed chunk files right as the scanner has
+            // them open, which fails the whole build with EBUSY/"used by another process". Old
+            // chunks are unreferenced by remoteEntry.js once superseded, so leaving them behind is
+            // functionally harmless -- `mvn clean` (or `yarn clean`, see package.json) already
+            // wipes this directory between real clean builds.
         },
         resolve: {
             mainFields: ['module', 'main'],

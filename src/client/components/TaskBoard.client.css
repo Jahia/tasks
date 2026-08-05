@@ -1,0 +1,40 @@
+/* Plain (non-CSS-modules) stylesheet, imported for its side effect only: this component is
+   bundled by both Vite (SSR view) and webpack (admin-dashboard tile), which disagree on
+   CSS-modules export shape (named vs. default) -- a side-effect-only import behaves identically
+   under both, so class names here are hand-prefixed instead to avoid collisions.
+
+   Uses Moonstone's own spacing tokens (not fixed px values) so this keeps matching the rest of
+   the Jahia admin UI if Moonstone's scale ever changes, instead of drifting out of sync with it. */
+.task-board__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+    padding: var(--spacing-medium);
+
+    /* Jahia's dashboard shell has no scroll container anywhere above this component (body
+       itself is overflow:hidden) -- every adminRoute tile is expected to supply its own
+       scroll region, the same way the built-in Home tile does (HomeScreen.scss .root).
+       Without min-height:0 the flex item can't shrink below its content size, so overflow-y
+       would never actually trigger. */
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.task-board__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+}
+
+.task-board__search {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-small);
+}
+
+.task-board__search-input {
+    width: 260px;
+}

@@ -51,12 +51,13 @@ public class TaskBoardMutationExtensions {
             throw new TaskGraphQLException("You are not eligible to be assigned this task");
         }
 
+        // Deliberately stays "active" here rather than flipping to "started": the UI has three
+        // distinct phases (Unassigned -> Assigned -> Active/In-Progress), and "started" is what
+        // marks the third one. An assigned-but-not-yet-started task is still "active", just with
+        // an owner now; updateTaskState(id, "started") (the client's own "Start" action) is what
+        // actually advances it, mirroring how unassignTask reverts a task to owner-less "active"
+        // rather than some other state.
         task.setProperty("assigneeUserKey", user.getUserKey());
-        // Assigning is what moves a task from the unassigned pool into someone's active work --
-        // the state must flip to "started" here, or the task stays "active" despite already
-        // having an owner, which is the state the rest of this class (suspendTask, completeTask,
-        // and unassignTask's own revert-to-active) treats as "not yet picked up by anyone".
-        task.setProperty("state", "started");
         session.save();
         return new GqlTaskBoard(task);
     }

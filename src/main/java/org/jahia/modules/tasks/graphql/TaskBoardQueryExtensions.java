@@ -70,6 +70,10 @@ public class TaskBoardQueryExtensions {
             @GraphQLName("filterState")
             @GraphQLDescription("Restrict results to these task states (active, started, finished, suspended)")
             List<String> filterState,
+            @GraphQLName("search")
+            @GraphQLDescription("Case-insensitive substring match against title, creator, assignee and state; "
+                    + "matches if any one of them contains it")
+            String search,
             DataFetchingEnvironment environment) throws RepositoryException {
 
         JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
@@ -131,7 +135,24 @@ public class TaskBoardQueryExtensions {
         Stream<GqlTaskBoard> stream = StreamSupport.stream(nodes.spliterator(), false)
                 .map(GqlTaskBoard::new);
 
+        // Not part of the JCR-SQL2 statement above: title/assignee are resolved values (the
+        // stored jcr:title can be a "##resourceBundle(...)##" macro, and assigneeUserKey is a
+        // path, neither of which is what the search box's placeholder promises to match against),
+        // so this filters the same per-row values getTitle()/getAssigneeDisplayName() already
+        // compute for display, after the JCR query, rather than against the raw stored properties.
+        if (search != null && !search.trim().isEmpty()) {
+            String needle = search.trim().toLowerCase();
+            stream = stream.filter(task -> containsIgnoreCase(task.getTitle(), needle)
+                    || containsIgnoreCase(task.getCreator(), needle)
+                    || containsIgnoreCase(task.getAssigneeDisplayName(), needle)
+                    || containsIgnoreCase(task.getState(), needle));
+        }
+
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
+    }
+
+    private static boolean containsIgnoreCase(String value, String lowercaseNeedle) {
+        return value != null && value.toLowerCase().contains(lowercaseNeedle);
     }
 
     @GraphQLField

@@ -1,11 +1,14 @@
 import {useEffect, useState} from 'react';
 import {Banner, Loader} from '@jahia/moonstone';
-import TaskBoard from '../client/components/TaskBoard.client';
+import TaskBoard, {DEFAULT_PAGE_SIZE} from '../client/components/TaskBoard.client';
 import {callGraphQL} from '../client/lib/graphqlClient';
 import {INITIAL_TASK_BOARD_QUERY} from '../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.shared';
 
-const PAGE_SIZE = 20;
+// Must match TaskBoard's own itemsPerPage default -- otherwise the first page fetched here
+// (before TaskBoard's itemsPerPage state exists) would disagree with the page size TaskBoard
+// starts life expecting once it takes over pagination.
+const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 // Relative to the current origin -- there's no SSR-side buildEndpointUrl() helper available
 // here (that's part of @jahia/javascript-modules-library, forbidden outside server components),
 // but a plain relative path resolves correctly from a route rendered in the browser.

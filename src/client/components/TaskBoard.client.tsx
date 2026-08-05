@@ -1,7 +1,12 @@
-import type {MutableRefObject} from 'react';
+import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Add, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Loader, Menu, MenuItem, Typography} from '@jahia/moonstone';
+import {Add, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, Search, Separator, Typography} from '@jahia/moonstone';
 import type {DataTableColumn} from '@jahia/moonstone/DataTable';
+// Deep import, not the package's bare '@jahia/moonstone-alpha' entry point: that barrel
+// (dist/components/index.js) re-exports Checkbox/DatePicker/etc. too, which drag in transitive
+// deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
+// the matching deep path in moonstone-alpha.d.ts.
+import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayout';
 import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
@@ -12,8 +17,15 @@ import {
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
 import type {TaskBoardConnection, TaskBoardNode} from './taskBoard.shared';
+import {UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import './TaskBoard.client.css';
 
-const PAGE_SIZE = 20;
+export const DEFAULT_PAGE_SIZE = 25;
+const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
+// Debounce so every keystroke doesn't fire its own request -- this is a server round-trip
+// (TaskBoardQueryExtensions#taskBoard filters title/creator/assignee/state), not a client-side
+// filter over an already-fully-loaded list.
+const SEARCH_DEBOUNCE_MS = 350;
 
 type TaskBoardProps = {
     initialConnection: TaskBoardConnection;
@@ -83,60 +95,78 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
 
     const canAct = task.owner === currentUserKey || canReviewAll;
     const targetUrl = task.targetNode?.url;
-    const actions: MenuAction[] = [];
+    // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
+    // started) -> Active/In-Progress (started). assignTaskToMe deliberately leaves state
+    // "active" (see its own comment), so "owner present" is what distinguishes Assigned from
+    // Unassigned within that one state value; "Start" (updateTaskState -> "started") is the only
+    // way from Assigned into Active/In-Progress.
+    const isUnassigned = !task.owner;
+    const primaryActions: MenuAction[] = [];
+    // Kept visually separated (a Separator, extra spacing) from primaryActions below: these are
+    // workflow publication decisions, not routine task-management actions.
+    const decisionActions: MenuAction[] = [];
+    let showPreview = false;
 
-    if (task.state === 'active') {
-        actions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
-    }
-
-    if (canAct && (task.state === 'active' || task.state === 'started' || task.state === 'suspended')) {
-        actions.push({label: 'Unassign / Refuse', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}});
-    }
-
-    if (canAct && task.state === 'started') {
-        actions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}});
-        for (const outcome of task.possibleOutcomes) {
-            actions.push({
-                label: outcomeLabel(outcome),
-                mutation: COMPLETE_TASK_MUTATION,
-                variables: {id: task.id, outcome}
-            });
+    if (task.state === 'active' && isUnassigned) {
+        primaryActions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
+    } else if (canAct && task.state === 'active') {
+        // Assigned, not started yet.
+        primaryActions.push({label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}});
+        primaryActions.push({label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}});
+    } else if (canAct && task.state === 'started') {
+        primaryActions.push({label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}});
+        primaryActions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}});
+        showPreview = true;
+        // Reject publication before Publish, matching the requested layout order, regardless of
+        // the order possibleOutcomes happens to list them in (workflow-definition-specific).
+        const outcomes = task.possibleOutcomes
+            .map(outcome => ({outcome, label: outcomeLabel(outcome)}))
+            .sort((a, b) => Number(a.label !== 'Reject publication') - Number(b.label !== 'Reject publication'));
+        for (const {outcome, label} of outcomes) {
+            decisionActions.push({label, mutation: COMPLETE_TASK_MUTATION, variables: {id: task.id, outcome}});
         }
+    } else if (canAct && task.state === 'suspended') {
+        primaryActions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
     }
 
-    if (canAct && task.state === 'suspended') {
-        actions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
-    }
+    const runAction = (action: MenuAction) => {
+        setMenuOpen(false);
+        onAction(action.mutation, action.variables);
+    };
 
     // Menu requires each top-level child to be a single MenuItem element -- its internal
     // auto-search-threshold check (Menu.tsx) does `children[0].props[...]`, which throws if
     // children[0] is itself an array (e.g. the direct result of actions.map(...) placed
     // alongside a sibling JSX expression). Building one flat array up front, instead of a
     // ternary/&& mix of JSX expressions as Menu's children, keeps every child a plain element.
-    const menuItems = actions.length === 0
-        ? [<MenuItem key="none" label="No actions available" isDisabled/>]
-        : actions.map((action, index) => (
-            <MenuItem
-                key={`${index}-${action.label}`}
-                label={action.label}
-                onClick={() => {
-                    setMenuOpen(false);
-                    onAction(action.mutation, action.variables);
-                }}
-            />
-        ));
+    const menuItems: ReactElement[] = [];
 
-    if (targetUrl) {
-        menuItems.push(
-            <MenuItem
-                key="preview"
-                label="Preview"
-                onClick={() => {
-                    setMenuOpen(false);
-                    window.open(targetUrl, '_blank', 'noopener,noreferrer');
-                }}
-            />
-        );
+    if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
+        menuItems.push(<MenuItem key="none" label="No actions available" isDisabled/>);
+    } else {
+        primaryActions.forEach((action, index) => {
+            menuItems.push(<MenuItem key={`primary-${index}`} label={action.label} onClick={() => runAction(action)}/>);
+        });
+
+        if (showPreview && targetUrl) {
+            menuItems.push(
+                <MenuItem
+                    key="preview"
+                    label="Preview"
+                    onClick={() => {
+                        setMenuOpen(false);
+                        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+                    }}
+                />
+            );
+        }
+
+        if (decisionActions.length > 0) {
+            menuItems.push(<Separator key="decision-separator" spacing="medium"/>);
+            decisionActions.forEach((action, index) => {
+                menuItems.push(<MenuItem key={`decision-${index}`} label={action.label} onClick={() => runAction(action)}/>);
+            });
+        }
     }
 
     return (
@@ -168,6 +198,11 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     const [isLoading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+    const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_PAGE_SIZE);
+    // searchInput is what the box shows on every keystroke; search is the debounced value
+    // that actually goes into the query (see SEARCH_DEBOUNCE_MS above).
+    const [searchInput, setSearchInput] = useState('');
+    const [search, setSearch] = useState('');
     // Relay-style cursor pagination only supports moving forward one page at a
     // time; this caches the cursor needed to fetch each page once it has been
     // reached, so navigating back to an already-visited page doesn't require
@@ -180,13 +215,19 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         }
     }, [currentPage, connection.pageInfo.hasNextPage, connection.pageInfo.endCursor]);
 
+    useEffect(() => {
+        const handle = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(handle);
+    }, [searchInput]);
+
     const loadPage = useCallback(async (page: number) => {
         setLoading(true);
         setError(null);
         try {
             const data = await callGraphQL<{taskBoard: TaskBoardConnection}>(graphqlEndpoint, TASK_BOARD_QUERY, {
-                first: PAGE_SIZE,
-                after: cursorsByPage.current.get(page)
+                first: itemsPerPage,
+                after: cursorsByPage.current.get(page),
+                search: search === '' ? null : search
             });
             setConnection(data.taskBoard);
             setCurrentPage(page);
@@ -195,7 +236,24 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint]);
+    }, [graphqlEndpoint, itemsPerPage, search]);
+
+    // itemsPerPage/search both change what the *first* page even means, so neither can be
+    // applied by just re-fetching the current page -- every cached cursor is invalidated and
+    // this always jumps back to page 1. Skipped on mount: initialConnection already is page 1
+    // at the (unchanged) default itemsPerPage/no search.
+    const isInitialMount = useRef(true);
+    useEffect(() => {
+        if (isInitialMount.current) {
+            isInitialMount.current = false;
+            return;
+        }
+
+        cursorsByPage.current = new Map([[1, undefined]]);
+        loadPage(1);
+        // Deliberately reacts only to itemsPerPage/search: loadPage already closes over both
+        // (declared above) plus graphqlEndpoint/currentPage, which this effect doesn't care about.
+    }, [itemsPerPage, search]);
 
     const handlePageChange = (nextPage: number) => {
         // Clamp forward jumps to one page at a time -- see the cursor cache
@@ -268,33 +326,53 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     const rows = connection.edges.map(edge => edge.node);
 
     return (
-        <div className="task-board__layout">
-            <Header title="Tasks"/>
-            <div className="task-board__toolbar">
-                <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
-            </div>
-            {error && (
-                <Banner title="Something went wrong" variant="danger">
-                    {error}
-                </Banner>
+        <ContentLayout
+            paper
+            header={(
+                <div style={{backgroundColor: 'white'}}>
+                    <Header title="Tasks"/>
+                </div>
             )}
-            {isLoading ? (
-                <Loader/>
-            ) : rows.length === 0 ? (
-                <EmptyData message="No tasks to show."/>
-            ) : (
-                <DataTable
-                    primaryKey="id"
-                    data={rows}
-                    columns={columns}
-                    enablePagination
-                    currentPage={currentPage}
-                    itemsPerPage={PAGE_SIZE}
-                    itemsPerPageOptions={[PAGE_SIZE]}
-                    totalItems={connection.pageInfo.totalCount}
-                    onPageChange={handlePageChange}
-                />
+            content={(
+                <div className="task-board__content">
+                    <div className="task-board__toolbar">
+                        <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
+                        <div className="task-board__search">
+                            <Typography variant="body" weight="semiBold">Search:</Typography>
+                            <Input
+                                className="task-board__search-input"
+                                icon={<Search/>}
+                                placeholder="Search tasks..."
+                                value={searchInput}
+                                onChange={e => setSearchInput(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    {error && (
+                        <Banner title="Something went wrong" variant="danger">
+                            {error}
+                        </Banner>
+                    )}
+                    {isLoading ? (
+                        <Loader/>
+                    ) : rows.length === 0 ? (
+                        <EmptyData message="No tasks to show."/>
+                    ) : (
+                        <DataTable
+                            primaryKey="id"
+                            data={rows}
+                            columns={columns}
+                            enablePagination
+                            currentPage={currentPage}
+                            itemsPerPage={itemsPerPage}
+                            itemsPerPageOptions={ITEMS_PER_PAGE_OPTIONS}
+                            onItemsPerPageChange={setItemsPerPage}
+                            totalItems={connection.pageInfo.totalCount}
+                            onPageChange={handlePageChange}
+                        />
+                    )}
+                </div>
             )}
-        </div>
+        />
     );
 }
