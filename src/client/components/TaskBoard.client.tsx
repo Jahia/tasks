@@ -1,7 +1,5 @@
-import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Add, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, Search, Separator, Typography} from '@jahia/moonstone';
-import type {DataTableColumn, SortDirection} from '@jahia/moonstone/DataTable';
+import {ArrowDown, ArrowUp, Banner, Button, Chip, Dropdown, EmptyData, Header, Input, Loader, Pagination, Search, Typography} from '@jahia/moonstone';
 // Deep import, not the package's bare '@jahia/moonstone-alpha' entry point: that barrel
 // (dist/components/index.js) re-exports Checkbox/DatePicker/etc. too, which drag in transitive
 // deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
@@ -11,6 +9,8 @@ import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
+    DEFAULT_SORT_BY,
+    DEFAULT_SORT_ORDER,
     NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
     SUSPEND_TASK_MUTATION,
@@ -27,6 +27,16 @@ const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 // (TaskBoardQueryExtensions#taskBoard filters title/creator/assignee/state), not a client-side
 // filter over an already-fully-loaded list.
 const SEARCH_DEBOUNCE_MS = 350;
+
+type SortField = 'title' | 'creator' | 'owner' | 'state';
+type SortDirection = 'ascending' | 'descending';
+
+const SORT_OPTIONS: Array<{label: string; value: SortField}> = [
+    {label: 'Task Name', value: 'title'},
+    {label: 'Creator', value: 'creator'},
+    {label: 'Owner', value: 'owner'},
+    {label: 'State', value: 'state'}
+];
 
 type TaskBoardProps = {
     initialConnection: TaskBoardConnection;
@@ -69,13 +79,32 @@ function outcomeLabel(outcome: string): string {
     return capitalize(outcome);
 }
 
+// "2026-07-20T11:39:20.123Z" -> "July 20, 2026, 11:39:20 AM". Formatted client-side (rather than
+// baking a fixed locale into the server's ISO-8601 getCreatedDate()) so it can follow the
+// viewer's own locale later; hardcoded to 'en-US' for now, matching every other hardcoded English
+// label already in this component.
+function formatCreatedDate(iso: string | null): string | null {
+    if (!iso) {
+        return null;
+    }
+
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    const datePart = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'}).format(date);
+    const timePart = new Intl.DateTimeFormat('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true}).format(date);
+    return `${datePart}, ${timePart}`;
+}
+
 type MenuAction = {
     label: string;
     mutation: string;
     variables: {id: string} & Record<string, unknown>;
 };
 
-type ActionsCellProps = {
+type TaskActionsProps = {
     task: TaskBoardNode;
     currentUserKey: string;
     canReviewAll: boolean;
@@ -83,17 +112,11 @@ type ActionsCellProps = {
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
 };
 
-// A client-side mirror of the server's state/ownership rules, for deciding
-// which menu items to show -- purely a UX nicety. TaskBoardMutationExtensions
-// independently re-checks every one of these server-side and is the real
-// security boundary; a wrong guess here just surfaces as an error banner.
-function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: ActionsCellProps) {
-    const [isMenuOpen, setMenuOpen] = useState(false);
-    // Menu's anchorEl prop is typed as a non-nullable MutableRefObject, but a
-    // DOM ref can only ever start out null -- the cast is confined to this one
-    // prop instead of widening the ref's own (accurately nullable) type.
-    const anchorRef = useRef<HTMLDivElement>(null);
-
+// Same state/ownership rules as before this component's redesign -- just rendered as visible,
+// always-on-screen buttons now instead of a 3-dot menu. TaskBoardMutationExtensions
+// independently re-checks every one of these server-side and is the real security boundary; a
+// wrong guess here just surfaces as an error banner.
+function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: TaskActionsProps) {
     const canAct = task.owner === currentUserKey || canReviewAll;
     const targetUrl = task.targetNode?.url;
     // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
@@ -103,8 +126,8 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
     // way from Assigned into Active/In-Progress.
     const isUnassigned = !task.owner;
     const primaryActions: MenuAction[] = [];
-    // Kept visually separated (a Separator, extra spacing) from primaryActions below: these are
-    // workflow publication decisions, not routine task-management actions.
+    // Kept visually separated (extra spacing below) from primaryActions: these are workflow
+    // publication decisions, not routine task-management actions.
     const decisionActions: MenuAction[] = [];
     let showPreview = false;
 
@@ -130,66 +153,106 @@ function ActionsCell({task, currentUserKey, canReviewAll, isBusy, onAction}: Act
         primaryActions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
     }
 
-    const runAction = (action: MenuAction) => {
-        setMenuOpen(false);
-        onAction(action.mutation, action.variables);
-    };
-
-    // Menu requires each top-level child to be a single MenuItem element -- its internal
-    // auto-search-threshold check (Menu.tsx) does `children[0].props[...]`, which throws if
-    // children[0] is itself an array (e.g. the direct result of actions.map(...) placed
-    // alongside a sibling JSX expression). Building one flat array up front, instead of a
-    // ternary/&& mix of JSX expressions as Menu's children, keeps every child a plain element.
-    const menuItems: ReactElement[] = [];
-
     if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
-        menuItems.push(<MenuItem key="none" label="No actions available" isDisabled/>);
-    } else {
-        primaryActions.forEach((action, index) => {
-            menuItems.push(<MenuItem key={`primary-${index}`} label={action.label} onClick={() => runAction(action)}/>);
-        });
-
-        if (showPreview && targetUrl) {
-            menuItems.push(
-                <MenuItem
-                    key="preview"
-                    label="Preview"
-                    onClick={() => {
-                        setMenuOpen(false);
-                        window.open(targetUrl, '_blank', 'noopener,noreferrer');
-                    }}
-                />
-            );
-        }
-
-        if (decisionActions.length > 0) {
-            menuItems.push(<Separator key="decision-separator" spacing="medium"/>);
-            decisionActions.forEach((action, index) => {
-                menuItems.push(<MenuItem key={`decision-${index}`} label={action.label} onClick={() => runAction(action)}/>);
-            });
-        }
+        return <Typography variant="caption" weight="light">No actions available</Typography>;
     }
 
     return (
-        <>
-            <div ref={anchorRef}>
-                <Button
-                    icon={isMenuOpen ? <Close/> : <Add/>}
-                    variant={isMenuOpen ? 'default' : 'ghost'}
-                    size="small"
-                    isDisabled={isBusy}
-                    aria-label={isMenuOpen ? 'Hide task actions' : 'Show task actions'}
-                    onClick={() => setMenuOpen(open => !open)}
-                />
+        <div className="task-board__actions">
+            <div className="task-board__actions-row">
+                {primaryActions.map((action, index) => (
+                    <Button
+                        key={`primary-${index}`}
+                        label={action.label}
+                        size="small"
+                        isDisabled={isBusy}
+                        onClick={() => onAction(action.mutation, action.variables)}
+                    />
+                ))}
+                {showPreview && targetUrl && (
+                    <Button
+                        label="Preview"
+                        size="small"
+                        variant="ghost"
+                        isDisabled={isBusy}
+                        onClick={() => window.open(targetUrl, '_blank', 'noopener,noreferrer')}
+                    />
+                )}
             </div>
-            <Menu
-                isDisplayed={isMenuOpen}
-                anchorEl={anchorRef as MutableRefObject<HTMLDivElement>}
-                onClose={() => setMenuOpen(false)}
-            >
-                {menuItems}
-            </Menu>
-        </>
+            {decisionActions.length > 0 && (
+                <div className="task-board__actions-row task-board__actions-row--decisions">
+                    {decisionActions.map((action, index) => (
+                        <Button
+                            key={`decision-${index}`}
+                            label={action.label}
+                            size="small"
+                            color="accent"
+                            isDisabled={isBusy}
+                            onClick={() => onAction(action.mutation, action.variables)}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+type TaskCardProps = {
+    task: TaskBoardNode;
+    currentUserKey: string;
+    canReviewAll: boolean;
+    isBusy: boolean;
+    onAction: (mutation: string, variables: Record<string, unknown>) => void;
+};
+
+function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: TaskCardProps) {
+    const targetTitle = task.targetNode?.property?.value;
+    const createdDate = formatCreatedDate(task.createdDate);
+    // The workflow-engine-derived summary (TaskBoardQueryExtensions#getWorkflowSummary) is only
+    // available for a jnt:workflowTask whose process is still live; a plain jnt:task, or one
+    // whose summary couldn't be resolved, falls back to its own free-text description instead.
+    const summaryLine = task.workflowSummary ?? task.description;
+
+    return (
+        <div className="task-board__card">
+            <div className="task-board__card-header">
+                <Typography component="span" weight="semiBold" variant="body">
+                    {task.title ?? 'Untitled task'}
+                </Typography>
+                {targetTitle && task.targetNode?.url && (
+                    <a
+                        className="task-board__target-link"
+                        href={task.targetNode.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        {targetTitle}
+                    </a>
+                )}
+            </div>
+            {createdDate && (
+                <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                    {`Created by: ${task.creator ?? 'Unknown'}, on ${createdDate}`}
+                </Typography>
+            )}
+            {summaryLine && (
+                <Typography component="p" variant="body" className="task-board__summary">
+                    {summaryLine}
+                </Typography>
+            )}
+            <div className="task-board__badges">
+                <Typography variant="caption" weight="light">{`Creator: ${task.creator ?? '—'}`}</Typography>
+                <Typography variant="caption" weight="light">{`Owner: ${task.assigneeDisplayName ?? 'Unassigned'}`}</Typography>
+                <Chip label={capitalize(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
+            </div>
+            <TaskActions
+                task={task}
+                currentUserKey={currentUserKey}
+                canReviewAll={canReviewAll}
+                isBusy={isBusy}
+                onAction={onAction}
+            />
+        </div>
     );
 }
 
@@ -204,11 +267,10 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     // that actually goes into the query (see SEARCH_DEBOUNCE_MS above).
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
-    // undefined = no column sorted yet (server's default jcr:created-desc order). DataTable
-    // itself owns the sort-direction toggle/arrow (uncontrolled -- see handleSortChange below);
-    // this just mirrors that choice so it can be sent to the server.
-    const [sortBy, setSortBy] = useState<string | undefined>(undefined);
-    const [sortOrder, setSortOrder] = useState<SortDirection | undefined>(undefined);
+    // Always a concrete field/direction (never "unsorted") -- see DEFAULT_SORT_BY/_ORDER's own
+    // comment for why: the sort-by dropdown always needs a real value to display.
+    const [sortBy, setSortBy] = useState<SortField>(DEFAULT_SORT_BY as SortField);
+    const [sortOrder, setSortOrder] = useState<SortDirection>(DEFAULT_SORT_ORDER as SortDirection);
     // Relay-style cursor pagination only supports moving forward one page at a
     // time; this caches the cursor needed to fetch each page once it has been
     // reached, so navigating back to an already-visited page doesn't require
@@ -234,8 +296,8 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                 first: itemsPerPage,
                 after: cursorsByPage.current.get(page),
                 search: search === '' ? null : search,
-                sortBy: sortBy ?? null,
-                sortOrder: sortOrder ?? null,
+                sortBy,
+                sortOrder,
                 filterState: NOT_FINISHED_STATES
             });
             setConnection(data.taskBoard);
@@ -265,11 +327,6 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         // effect doesn't care about.
     }, [itemsPerPage, search, sortBy, sortOrder]);
 
-    const handleSortChange = (nextSortBy: string, nextSortDirection: SortDirection) => {
-        setSortBy(nextSortBy);
-        setSortOrder(nextSortDirection);
-    };
-
     const handlePageChange = (nextPage: number) => {
         // Clamp forward jumps to one page at a time -- see the cursor cache
         // comment above for why arbitrary jumps aren't possible here.
@@ -292,58 +349,6 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         }
     }, [graphqlEndpoint, currentPage, loadPage]);
 
-    const columns: ReadonlyArray<DataTableColumn<TaskBoardNode>> = [
-        {
-            key: 'title',
-            label: 'Task Name',
-            isSortable: true,
-            // DataTableColumn's `value` type is the union of every column's
-            // property type on T, not just this column's -- these four are
-            // all known to be `string | null` on TaskBoardNode.
-            render: ({value}) => <Typography weight="semiBold">{(value as string | null) ?? 'Untitled task'}</Typography>
-        },
-        {
-            key: 'creator',
-            label: 'Creator',
-            isSortable: true,
-            render: ({value}) => <Typography variant="body">{(value as string | null) ?? '—'}</Typography>
-        },
-        {
-            key: 'owner',
-            label: 'Owner',
-            isSortable: true,
-            // owner itself is the raw assigneeUserKey (a JCR path, e.g. /users/jb/ac/eh/irina) --
-            // it stays the column's `key` because that's what canAct/canReviewAll logic compares
-            // against, but the cell displays assigneeDisplayName (just the user node's name), and
-            // sorting this column (see TaskBoardQueryExtensions#taskBoard's "owner" sort field)
-            // orders by that same display name, not the raw path.
-            render: ({data}) => <Typography variant="body">{data.assigneeDisplayName ?? 'Unassigned'}</Typography>
-        },
-        {
-            key: 'state',
-            label: 'State',
-            isSortable: true,
-            render: ({value}) => {
-                const state = value as string | null;
-                return <Chip label={capitalize(state)} color={(state && STATE_CHIP_COLOR[state]) || 'default'}/>;
-            }
-        },
-        {
-            key: 'id',
-            label: 'Actions',
-            align: 'right',
-            render: ({data}) => (
-                <ActionsCell
-                    task={data}
-                    currentUserKey={currentUserKey}
-                    canReviewAll={canReviewAll}
-                    isBusy={busyTaskId === data.id}
-                    onAction={handleAction}
-                />
-            )
-        }
-    ];
-
     const rows = connection.edges.map(edge => edge.node);
 
     return (
@@ -358,15 +363,33 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                 <div className="task-board__content">
                     <div className="task-board__toolbar">
                         <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
-                        <div className="task-board__search">
-                            <Typography variant="body" weight="semiBold">Search:</Typography>
-                            <Input
-                                className="task-board__search-input"
-                                icon={<Search/>}
-                                placeholder="Search tasks..."
-                                value={searchInput}
-                                onChange={e => setSearchInput(e.target.value)}
-                            />
+                        <div className="task-board__toolbar-controls">
+                            <div className="task-board__sort">
+                                <Typography variant="body" weight="semiBold">Sort by:</Typography>
+                                <Dropdown
+                                    size="small"
+                                    data={SORT_OPTIONS}
+                                    value={sortBy}
+                                    onChange={(_event, item) => setSortBy(item.value as SortField)}
+                                />
+                                <Button
+                                    icon={sortOrder === 'descending' ? <ArrowDown/> : <ArrowUp/>}
+                                    variant="ghost"
+                                    size="small"
+                                    aria-label={sortOrder === 'descending' ? 'Sort ascending' : 'Sort descending'}
+                                    onClick={() => setSortOrder(current => (current === 'ascending' ? 'descending' : 'ascending'))}
+                                />
+                            </div>
+                            <div className="task-board__search">
+                                <Typography variant="body" weight="semiBold">Search:</Typography>
+                                <Input
+                                    className="task-board__search-input"
+                                    icon={<Search/>}
+                                    placeholder="Search tasks..."
+                                    value={searchInput}
+                                    onChange={e => setSearchInput(e.target.value)}
+                                />
+                            </div>
                         </div>
                     </div>
                     {error && (
@@ -379,18 +402,26 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                     ) : rows.length === 0 ? (
                         <EmptyData message="No tasks to show."/>
                     ) : (
-                        <DataTable
-                            primaryKey="id"
-                            data={rows}
-                            columns={columns}
-                            enableSorting
-                            onSortChange={handleSortChange}
-                            enablePagination
+                        <div className="task-board__list">
+                            {rows.map(task => (
+                                <TaskCard
+                                    key={task.id}
+                                    task={task}
+                                    currentUserKey={currentUserKey}
+                                    canReviewAll={canReviewAll}
+                                    isBusy={busyTaskId === task.id}
+                                    onAction={handleAction}
+                                />
+                            ))}
+                        </div>
+                    )}
+                    {!isLoading && rows.length > 0 && (
+                        <Pagination
                             currentPage={currentPage}
                             itemsPerPage={itemsPerPage}
                             itemsPerPageOptions={ITEMS_PER_PAGE_OPTIONS}
                             onItemsPerPageChange={setItemsPerPage}
-                            totalItems={connection.pageInfo.totalCount}
+                            totalOfItems={connection.pageInfo.totalCount}
                             onPageChange={handlePageChange}
                         />
                     )}

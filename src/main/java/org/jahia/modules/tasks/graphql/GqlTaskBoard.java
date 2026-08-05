@@ -12,6 +12,9 @@ import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.usermanager.JahiaUserManagerService;
+import org.jahia.services.workflow.Workflow;
+import org.jahia.services.workflow.WorkflowService;
+import org.jahia.services.workflow.WorkflowTask;
 import org.jahia.utils.i18n.JahiaLocaleContextHolder;
 import org.jahia.utils.i18n.Messages;
 
@@ -19,6 +22,7 @@ import javax.jcr.ItemNotFoundException;
 import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
+import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -148,14 +152,83 @@ public class GqlTaskBoard {
             return null;
         }
         try {
-            return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
-                    .getNode(assigneeUserKey).getName();
-        } catch (PathNotFoundException e) {
-            // assigneeUserKey isn't a resolvable node path on this provider/version -- fall back to the raw key
-            // rather than erroring, since legacy data may store it in a different format.
-            return assigneeUserKey;
+            return resolveUserDisplayName(assigneeUserKey);
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve assignee display name", e);
+        }
+    }
+
+    // Shared by getAssigneeDisplayName() and getWorkflowSummary()'s start-user resolution --
+    // both are "a JCR user-key property that should resolve to a readable display name".
+    private static String resolveUserDisplayName(String userKey) throws RepositoryException {
+        try {
+            return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
+                    .getNode(userKey).getName();
+        } catch (PathNotFoundException e) {
+            // Not a resolvable node path on this provider/version -- fall back to the raw key
+            // rather than erroring, since legacy data may store it in a different format.
+            return userKey;
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Task creation date/time (jcr:created), as an ISO-8601 instant; null if unavailable")
+    public String getCreatedDate() {
+        try {
+            if (!node.hasProperty("jcr:created")) {
+                return null;
+            }
+            return node.getProperty("jcr:created").getDate().toInstant().toString();
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to read task creation date", e);
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("One-line workflow summary for a jnt:workflowTask whose process is still live, e.g. "
+            + "\"en - One step publication started by anne on 7/20/26 - 1 content items involved\". Null for a "
+            + "plain jnt:task (no workflow at all), or if the underlying process can no longer be resolved.")
+    public String getWorkflowSummary() {
+        try {
+            if (!node.hasProperty("provider") || !node.hasProperty("taskId")) {
+                // Plain jnt:task -- never had a workflow process to begin with.
+                return null;
+            }
+            Locale locale = JahiaLocaleContextHolder.getLocale();
+            String provider = node.getPropertyAsString("provider");
+            String taskId = node.getPropertyAsString("taskId");
+
+            WorkflowService workflowService = WorkflowService.getInstance();
+            WorkflowTask task = workflowService.getWorkflowTask(taskId, provider, locale);
+            if (task == null || task.getWorkflowDefinition() == null) {
+                return null;
+            }
+
+            // (provider, id, locale) -- WorkflowService#getWorkflow is the one method in this API
+            // where provider comes FIRST; getWorkflowTask/getHistoryWorkflow both take (id,
+            // provider, locale) instead. Getting this backwards throws (provider looked up by an
+            // arbitrary process id never matches a registered WorkflowProvider key).
+            Workflow workflow = workflowService.getWorkflow(provider, task.getProcessId(), locale);
+            if (workflow == null || workflow.getStartUser() == null || workflow.getStartTime() == null) {
+                // WorkflowService returns null once a process instance is no longer live in the
+                // jBPM session -- shouldn't normally happen for a task whose process is still
+                // open, but isn't guaranteed, so this degrades to "no summary" rather than erroring.
+                return null;
+            }
+
+            String startUserDisplayName = resolveUserDisplayName(workflow.getStartUser());
+            String startDate = DateFormat.getDateInstance(DateFormat.SHORT, locale).format(workflow.getStartTime());
+            Object nodeIds = workflow.getVariables() != null ? workflow.getVariables().get("nodeIds") : null;
+            int itemCount = nodeIds instanceof List ? ((List<?>) nodeIds).size() : 0;
+
+            return locale.getLanguage() + " - " + task.getWorkflowDefinition().getDisplayName()
+                    + " started by " + startUserDisplayName + " on " + startDate
+                    + " - " + itemCount + " content items involved";
+        } catch (Exception e) {
+            // Best-effort enrichment, not core task data: any failure here (a workflow-provider
+            // hiccup, a process that vanished between the two lookups above) just means this one
+            // summary line is missing from this row, not that the whole board query fails.
+            return null;
         }
     }
 

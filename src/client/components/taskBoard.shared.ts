@@ -15,6 +15,12 @@
 // complete, neutral listing endpoint -- every call site here just opts into this narrower view.
 export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
 
+// The board's own default sort -- a concrete starting field/direction rather than "no sort at
+// all", so a sort-by control always has a real selected value to display (and so the very first
+// render already matches whatever that control shows, before any interaction re-fetches anything).
+export const DEFAULT_SORT_BY = 'title';
+export const DEFAULT_SORT_ORDER = 'ascending';
+
 export const TASK_BOARD_QUERY = /* GraphQL */ `
     query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String]) {
         taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState) {
@@ -28,12 +34,18 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     id
                     title
                     creator
+                    createdDate
                     owner
                     assigneeDisplayName
                     state
                     possibleOutcomes
+                    description
+                    workflowSummary
                     targetNode {
                         url
+                        property(name: "jcr:title") {
+                            value
+                        }
                     }
                 }
             }
@@ -45,8 +57,8 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 // client island needs for its action-menu display logic (see
 // TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll).
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
-    query InitialTaskBoard($first: Int!, $filterState: [String]) {
-        taskBoard(first: $first, filterState: $filterState) {
+    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String) {
+        taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder) {
             pageInfo {
                 hasNextPage
                 endCursor
@@ -57,12 +69,18 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     id
                     title
                     creator
+                    createdDate
                     owner
                     assigneeDisplayName
                     state
                     possibleOutcomes
+                    description
+                    workflowSummary
                     targetNode {
                         url
+                        property(name: "jcr:title") {
+                            value
+                        }
                     }
                 }
             }
@@ -116,11 +134,14 @@ export type TaskBoardNode = {
     id: string;
     title: string | null;
     creator: string | null;
+    createdDate: string | null;
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
     possibleOutcomes: string[];
-    targetNode: {url: string} | null;
+    description: string | null;
+    workflowSummary: string | null;
+    targetNode: {url: string; property: {value: string} | null} | null;
 };
 
 export type TaskBoardConnection = {

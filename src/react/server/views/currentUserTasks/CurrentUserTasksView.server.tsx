@@ -1,6 +1,6 @@
 import {jahiaComponent, Island, useGQLQuery, buildEndpointUrl} from '@jahia/javascript-modules-library';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../../../../client/components/TaskBoard.client';
-import {INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../../../../client/components/taskBoard.shared';
+import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../../../../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../../../../client/components/taskBoard.shared';
 
 // Must match TaskBoard's own itemsPerPage default -- see TasksDashboardApp's identical constant
@@ -23,7 +23,7 @@ jahiaComponent(
         // fetches every subsequent page/mutation itself via plain fetch().
         const {data, errors} = useGQLQuery({
             query: INITIAL_TASK_BOARD_QUERY,
-            variables: {first: PAGE_SIZE, filterState: NOT_FINISHED_STATES}
+            variables: {first: PAGE_SIZE, filterState: NOT_FINISHED_STATES, sortBy: DEFAULT_SORT_BY, sortOrder: DEFAULT_SORT_ORDER}
         });
 
         if (errors && errors.length > 0) {

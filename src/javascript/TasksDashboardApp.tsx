@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {Banner, Loader} from '@jahia/moonstone';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../client/components/TaskBoard.client';
 import {callGraphQL} from '../client/lib/graphqlClient';
-import {INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../client/components/taskBoard.shared';
+import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.shared';
 
 // Must match TaskBoard's own itemsPerPage default -- otherwise the first page fetched here
@@ -34,7 +34,9 @@ export function TasksDashboardApp() {
         let cancelled = false;
         callGraphQL<InitialTaskBoardQueryResult>(GRAPHQL_ENDPOINT, INITIAL_TASK_BOARD_QUERY, {
             first: PAGE_SIZE,
-            filterState: NOT_FINISHED_STATES
+            filterState: NOT_FINISHED_STATES,
+            sortBy: DEFAULT_SORT_BY,
+            sortOrder: DEFAULT_SORT_ORDER
         })
             .then(data => {
                 if (!cancelled) {

@@ -29,6 +29,14 @@
     gap: var(--spacing-medium);
 }
 
+.task-board__toolbar-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-large);
+}
+
+.task-board__sort,
 .task-board__search {
     display: flex;
     align-items: center;
@@ -37,4 +45,69 @@
 
 .task-board__search-input {
     width: 260px;
+}
+
+.task-board__list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+}
+
+.task-board__card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+    padding: var(--spacing-medium);
+
+    border: 1px solid var(--color-gray_light);
+    border-radius: 4px;
+    background-color: var(--color-white);
+}
+
+.task-board__card-header {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--spacing-small);
+}
+
+/* The linked target page's own title, shown beside the task title -- distinct from the rest of
+   the card's plain text, since it's the one piece of this header that's actually clickable. */
+.task-board__target-link {
+    color: var(--color-accent_dark120, var(--color-accent));
+    text-decoration: none;
+}
+
+.task-board__target-link:hover {
+    text-decoration: underline;
+}
+
+.task-board__meta,
+.task-board__summary {
+    margin: 0;
+}
+
+.task-board__badges {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+}
+
+.task-board__actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+}
+
+.task-board__actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-small);
+}
+
+/* Extra spacing above the workflow-decision buttons (Reject publication/Publish), keeping them
+   visually separated from the routine task-management actions above (Unassign/Suspend/Preview). */
+.task-board__actions-row--decisions {
+    margin-top: var(--spacing-small);
 }
