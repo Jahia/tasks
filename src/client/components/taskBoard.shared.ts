@@ -8,9 +8,16 @@
  * both sides.
  */
 
+// The board's own default scope: everything except finished tasks, so completed work doesn't
+// pile up in the list forever. Passed as an explicit filterState value (an existing but,
+// until now, never-actually-called server arg -- see TaskBoardQueryExtensions#taskBoard) rather
+// than baked into the server as a hidden default, so the taskBoard query itself stays a
+// complete, neutral listing endpoint -- every call site here just opts into this narrower view.
+export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
+
 export const TASK_BOARD_QUERY = /* GraphQL */ `
-    query TaskBoard($first: Int!, $after: String, $search: String) {
-        taskBoard(first: $first, after: $after, search: $search) {
+    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String]) {
+        taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState) {
             pageInfo {
                 hasNextPage
                 endCursor
@@ -38,8 +45,8 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 // client island needs for its action-menu display logic (see
 // TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll).
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
-    query InitialTaskBoard($first: Int!) {
-        taskBoard(first: $first) {
+    query InitialTaskBoard($first: Int!, $filterState: [String]) {
+        taskBoard(first: $first, filterState: $filterState) {
             pageInfo {
                 hasNextPage
                 endCursor

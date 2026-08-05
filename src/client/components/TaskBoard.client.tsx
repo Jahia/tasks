@@ -1,7 +1,7 @@
 import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {Add, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, Search, Separator, Typography} from '@jahia/moonstone';
-import type {DataTableColumn} from '@jahia/moonstone/DataTable';
+import type {DataTableColumn, SortDirection} from '@jahia/moonstone/DataTable';
 // Deep import, not the package's bare '@jahia/moonstone-alpha' entry point: that barrel
 // (dist/components/index.js) re-exports Checkbox/DatePicker/etc. too, which drag in transitive
 // deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
@@ -11,6 +11,7 @@ import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
+    NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
     SUSPEND_TASK_MUTATION,
     TASK_BOARD_QUERY,
@@ -203,6 +204,11 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     // that actually goes into the query (see SEARCH_DEBOUNCE_MS above).
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
+    // undefined = no column sorted yet (server's default jcr:created-desc order). DataTable
+    // itself owns the sort-direction toggle/arrow (uncontrolled -- see handleSortChange below);
+    // this just mirrors that choice so it can be sent to the server.
+    const [sortBy, setSortBy] = useState<string | undefined>(undefined);
+    const [sortOrder, setSortOrder] = useState<SortDirection | undefined>(undefined);
     // Relay-style cursor pagination only supports moving forward one page at a
     // time; this caches the cursor needed to fetch each page once it has been
     // reached, so navigating back to an already-visited page doesn't require
@@ -227,7 +233,10 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
             const data = await callGraphQL<{taskBoard: TaskBoardConnection}>(graphqlEndpoint, TASK_BOARD_QUERY, {
                 first: itemsPerPage,
                 after: cursorsByPage.current.get(page),
-                search: search === '' ? null : search
+                search: search === '' ? null : search,
+                sortBy: sortBy ?? null,
+                sortOrder: sortOrder ?? null,
+                filterState: NOT_FINISHED_STATES
             });
             setConnection(data.taskBoard);
             setCurrentPage(page);
@@ -236,12 +245,12 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search]);
+    }, [graphqlEndpoint, itemsPerPage, search, sortBy, sortOrder]);
 
-    // itemsPerPage/search both change what the *first* page even means, so neither can be
-    // applied by just re-fetching the current page -- every cached cursor is invalidated and
-    // this always jumps back to page 1. Skipped on mount: initialConnection already is page 1
-    // at the (unchanged) default itemsPerPage/no search.
+    // itemsPerPage/search/sortBy/sortOrder all change what the *first* page even means, so none
+    // of them can be applied by just re-fetching the current page -- every cached cursor is
+    // invalidated and this always jumps back to page 1. Skipped on mount: initialConnection
+    // already is page 1 at the (unchanged) defaults.
     const isInitialMount = useRef(true);
     useEffect(() => {
         if (isInitialMount.current) {
@@ -251,9 +260,15 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
 
         cursorsByPage.current = new Map([[1, undefined]]);
         loadPage(1);
-        // Deliberately reacts only to itemsPerPage/search: loadPage already closes over both
-        // (declared above) plus graphqlEndpoint/currentPage, which this effect doesn't care about.
-    }, [itemsPerPage, search]);
+        // Deliberately reacts only to itemsPerPage/search/sortBy/sortOrder: loadPage already
+        // closes over all four (declared above) plus graphqlEndpoint/currentPage, which this
+        // effect doesn't care about.
+    }, [itemsPerPage, search, sortBy, sortOrder]);
+
+    const handleSortChange = (nextSortBy: string, nextSortDirection: SortDirection) => {
+        setSortBy(nextSortBy);
+        setSortOrder(nextSortDirection);
+    };
 
     const handlePageChange = (nextPage: number) => {
         // Clamp forward jumps to one page at a time -- see the cursor cache
@@ -281,6 +296,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         {
             key: 'title',
             label: 'Task Name',
+            isSortable: true,
             // DataTableColumn's `value` type is the union of every column's
             // property type on T, not just this column's -- these four are
             // all known to be `string | null` on TaskBoardNode.
@@ -289,19 +305,24 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         {
             key: 'creator',
             label: 'Creator',
+            isSortable: true,
             render: ({value}) => <Typography variant="body">{(value as string | null) ?? '—'}</Typography>
         },
         {
             key: 'owner',
             label: 'Owner',
+            isSortable: true,
             // owner itself is the raw assigneeUserKey (a JCR path, e.g. /users/jb/ac/eh/irina) --
             // it stays the column's `key` because that's what canAct/canReviewAll logic compares
-            // against, but the cell displays assigneeDisplayName (just the user node's name).
+            // against, but the cell displays assigneeDisplayName (just the user node's name), and
+            // sorting this column (see TaskBoardQueryExtensions#taskBoard's "owner" sort field)
+            // orders by that same display name, not the raw path.
             render: ({data}) => <Typography variant="body">{data.assigneeDisplayName ?? 'Unassigned'}</Typography>
         },
         {
             key: 'state',
             label: 'State',
+            isSortable: true,
             render: ({value}) => {
                 const state = value as string | null;
                 return <Chip label={capitalize(state)} color={(state && STATE_CHIP_COLOR[state]) || 'default'}/>;
@@ -362,6 +383,8 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                             primaryKey="id"
                             data={rows}
                             columns={columns}
+                            enableSorting
+                            onSortChange={handleSortChange}
                             enablePagination
                             currentPage={currentPage}
                             itemsPerPage={itemsPerPage}

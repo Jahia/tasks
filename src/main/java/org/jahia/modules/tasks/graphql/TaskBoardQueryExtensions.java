@@ -26,8 +26,12 @@ import javax.jcr.Value;
 import javax.jcr.query.Query;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -53,8 +57,19 @@ import java.util.stream.StreamSupport;
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
 public class TaskBoardQueryExtensions {
 
+    // Raw JCR-SQL2-orderable properties -- the fallback/default ordering (still applied at the
+    // query level) for whichever of these isn't superseded by RESOLVED_VALUE_SORT_FIELDS below.
     private static final List<String> ALLOWED_SORT_PROPERTIES = Arrays.asList(
-            "jcr:created", "jcr:lastModified", "dueDate", "state", "jcr:title");
+            "jcr:created", "jcr:lastModified", "dueDate");
+
+    // The board's own clickable columns (Task Name/Creator/Owner/State) sort by their RESOLVED
+    // display value instead, the same way the search filter above matches resolved values rather
+    // than raw properties: jcr:title can be a "##resourceBundle(...)##" macro, and
+    // assigneeUserKey/jcr:createdBy are paths/user keys -- neither is what's shown (or would sort
+    // correctly) in the UI, so these are sorted in-memory, after the query, instead of via
+    // JCR-SQL2's "order by".
+    private static final Set<String> RESOLVED_VALUE_SORT_FIELDS = new HashSet<>(Arrays.asList(
+            "title", "creator", "owner", "state"));
 
     @GraphQLField
     @GraphQLConnection(connectionFetcher = DXPaginatedDataConnectionFetcher.class)
@@ -62,10 +77,12 @@ public class TaskBoardQueryExtensions {
             + "Admin/Reviewer sees every task, Contributor sees only their own, Public sees nothing")
     public static DXPaginatedData<GqlTaskBoard> taskBoard(
             @GraphQLName("sortBy")
-            @GraphQLDescription("Property to sort by: jcr:created, jcr:lastModified, dueDate, state or jcr:title (defaults to jcr:created)")
+            @GraphQLDescription("Either a board column -- title, creator, owner or state, sorted by the same "
+                    + "resolved value the UI displays -- or a raw property (jcr:created, jcr:lastModified, "
+                    + "dueDate) for a JCR-level sort. Defaults to jcr:created.")
             String sortBy,
             @GraphQLName("sortOrder")
-            @GraphQLDescription("asc or desc (defaults to desc)")
+            @GraphQLDescription("ascending/asc or descending/desc (defaults to desc)")
             String sortOrder,
             @GraphQLName("filterState")
             @GraphQLDescription("Restrict results to these task states (active, started, finished, suspended)")
@@ -120,11 +137,15 @@ public class TaskBoardQueryExtensions {
             statement.append(")");
         }
 
-        // Sort target is an identifier, not a value -- bind variables can't parameterize
-        // it, so it's constrained to a fixed allow-list instead (jahia-injection-defense).
+        boolean ascending = "asc".equalsIgnoreCase(sortOrder) || "ascending".equalsIgnoreCase(sortOrder);
+
+        // Sort target is an identifier, not a value -- bind variables can't parameterize it, so
+        // it's constrained to a fixed allow-list instead (jahia-injection-defense). When sortBy
+        // is one of the board's own columns (RESOLVED_VALUE_SORT_FIELDS), this default JCR-level
+        // order is just the stable pre-sort the in-memory sort below re-sorts on top of -- it
+        // still needs to be *some* deterministic order for that stable sort to be meaningful.
         String orderProperty = ALLOWED_SORT_PROPERTIES.contains(sortBy) ? sortBy : "jcr:created";
-        String orderDirection = "asc".equalsIgnoreCase(sortOrder) ? "asc" : "desc";
-        statement.append(" order by task.[").append(orderProperty).append("] ").append(orderDirection);
+        statement.append(" order by task.[").append(orderProperty).append("] ").append(ascending ? "asc" : "desc");
 
         QueryWrapper query = session.getWorkspace().getQueryManager().createQuery(statement.toString(), Query.JCR_SQL2);
         for (int i = 0; i < bindNames.size(); i++) {
@@ -148,11 +169,39 @@ public class TaskBoardQueryExtensions {
                     || containsIgnoreCase(task.getState(), needle));
         }
 
+        if (RESOLVED_VALUE_SORT_FIELDS.contains(sortBy)) {
+            Function<GqlTaskBoard, String> valueOf = resolvedValueExtractor(sortBy);
+            stream = stream.sorted(Comparator.comparing(valueOf, resolvedValueComparator(ascending)));
+        }
+
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
     }
 
     private static boolean containsIgnoreCase(String value, String lowercaseNeedle) {
         return value != null && value.toLowerCase().contains(lowercaseNeedle);
+    }
+
+    private static Function<GqlTaskBoard, String> resolvedValueExtractor(String sortBy) {
+        switch (sortBy) {
+            case "title":
+                return GqlTaskBoard::getTitle;
+            case "creator":
+                return GqlTaskBoard::getCreator;
+            case "owner":
+                return GqlTaskBoard::getAssigneeDisplayName;
+            case "state":
+                return GqlTaskBoard::getState;
+            default:
+                // Unreachable: only called when RESOLVED_VALUE_SORT_FIELDS.contains(sortBy).
+                throw new IllegalArgumentException("Not a resolved-value sort field: " + sortBy);
+        }
+    }
+
+    // Case-insensitive, with nulls sorted last regardless of direction (an unassigned owner or
+    // blank creator/title should always fall to the bottom, not jump to the top on "descending").
+    private static Comparator<String> resolvedValueComparator(boolean ascending) {
+        Comparator<String> direction = ascending ? String.CASE_INSENSITIVE_ORDER : String.CASE_INSENSITIVE_ORDER.reversed();
+        return Comparator.nullsLast(direction);
     }
 
     @GraphQLField

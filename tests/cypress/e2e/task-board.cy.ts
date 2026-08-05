@@ -125,6 +125,127 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
         });
     });
 
+    describe('sorting', () => {
+        // Titles deliberately alphabetize in a DIFFERENT order than their states do, so a
+        // title-sort test and a state-sort test each assert a distinct expected order -- proving
+        // each one actually sorts by its own field, not by some other coincidentally-matching order.
+        // "zzsort-" + the shared "search" param (already covered above) scopes the repo-wide query
+        // down to just these three, the same way the search describe block does.
+        const BRAVO_SUSPENDED = 'zzsort-bravo';
+        const ALPHA_ACTIVE = 'zzsort-alpha';
+        const CHARLIE_FINISHED = 'zzsort-charlie';
+        const names = [BRAVO_SUSPENDED, ALPHA_ACTIVE, CHARLIE_FINISHED];
+
+        before(() => {
+            addTask(BRAVO_SUSPENDED, [{name: 'state', value: 'suspended'}]);
+            addTask(ALPHA_ACTIVE, [{name: 'state', value: 'active'}]);
+            addTask(CHARLIE_FINISHED, [{name: 'state', value: 'finished'}]);
+        });
+
+        after(() => {
+            names.forEach(name => deleteNode(`${TASKS_CONTAINER}/${name}`));
+        });
+
+        function titlesOf(edges: Array<{node: {title: string}}>) {
+            return edges.map(edge => edge.node.title);
+        }
+
+        it('sorts by title ascending', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'title', sortOrder: 'ascending'}
+            }).then(({data}) => {
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([ALPHA_ACTIVE, BRAVO_SUSPENDED, CHARLIE_FINISHED]);
+            });
+        });
+
+        it('sorts by title descending (the same click toggling direction)', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'title', sortOrder: 'descending'}
+            }).then(({data}) => {
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([CHARLIE_FINISHED, BRAVO_SUSPENDED, ALPHA_ACTIVE]);
+            });
+        });
+
+        // Groups same-state tasks together, in state's own alphabetical order (active < finished
+        // < suspended) -- NOT title order, confirming this sorts by state and not by coincidence.
+        it('sorts by state ascending, grouping same-state tasks together', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'state', sortOrder: 'ascending'}
+            }).then(({data}) => {
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([ALPHA_ACTIVE, CHARLIE_FINISHED, BRAVO_SUSPENDED]);
+            });
+        });
+
+        // creator/owner go through the exact same resolved-value comparator as title/state
+        // (TaskBoardQueryExtensions#resolvedValueExtractor) -- this only confirms the server
+        // accepts them and doesn't error, not a specific expected order (rigging distinct,
+        // resolvable creator/assignee display names deterministically isn't worth the fixture
+        // complexity here).
+        it('accepts creator and owner as sort fields without erroring', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'creator', sortOrder: 'ascending'}
+            }).then(({data}) => {
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+            });
+
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'owner', sortOrder: 'ascending'}
+            }).then(({data}) => {
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+            });
+        });
+    });
+
+    describe('filterState (the board hides finished tasks by default)', () => {
+        const ACTIVE_ONE = 'zzfilter-active';
+        const FINISHED_ONE = 'zzfilter-finished';
+        const names = [ACTIVE_ONE, FINISHED_ONE];
+
+        before(() => {
+            addTask(ACTIVE_ONE, [{name: 'state', value: 'active'}]);
+            addTask(FINISHED_ONE, [{name: 'state', value: 'finished'}]);
+        });
+
+        after(() => {
+            names.forEach(name => deleteNode(`${TASKS_CONTAINER}/${name}`));
+        });
+
+        // This is the exact value taskBoard.shared.ts's NOT_FINISHED_STATES sends on every
+        // board fetch (TaskBoard.client.tsx / TasksDashboardApp.tsx / CurrentUserTasksView) --
+        // duplicated here rather than imported, since this spec runs as its own Cypress project
+        // with no dependency on the module's client source.
+        const NOT_FINISHED = ['active', 'started', 'suspended'];
+
+        it('excludes finished tasks when filterState is passed (the board\'s own default)', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzfilter', filterState: NOT_FINISHED}
+            }).then(({data}) => {
+                const titles = data.taskBoard.edges.map((edge: {node: {title: string}}) => edge.node.title);
+                expect(titles).to.include(ACTIVE_ONE);
+                expect(titles).to.not.include(FINISHED_ONE);
+            });
+        });
+
+        // The query itself stays a complete, neutral listing -- hiding finished tasks is the
+        // board's own choice of filterState, not a hidden server-side default.
+        it('still returns finished tasks when no filterState is passed at all', () => {
+            cy.apollo({
+                queryFile: 'graphql/taskBoard.query.graphql',
+                variables: {first: PAGE_SIZE, search: 'zzfilter'}
+            }).then(({data}) => {
+                const titles = data.taskBoard.edges.map((edge: {node: {title: string}}) => edge.node.title);
+                expect(titles).to.include(ACTIVE_ONE);
+                expect(titles).to.include(FINISHED_ONE);
+            });
+        });
+    });
+
     describe('row menu actions', () => {
         beforeEach(() => {
             cy.apolloClient({username: REVIEWER, password: REVIEWER_PASSWORD});

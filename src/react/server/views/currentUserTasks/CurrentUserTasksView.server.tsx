@@ -1,9 +1,11 @@
 import {jahiaComponent, Island, useGQLQuery, buildEndpointUrl} from '@jahia/javascript-modules-library';
-import TaskBoard from '../../../../client/components/TaskBoard.client';
-import {INITIAL_TASK_BOARD_QUERY} from '../../../../client/components/taskBoard.shared';
+import TaskBoard, {DEFAULT_PAGE_SIZE} from '../../../../client/components/TaskBoard.client';
+import {INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../../../../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../../../../client/components/taskBoard.shared';
 
-const PAGE_SIZE = 20;
+// Must match TaskBoard's own itemsPerPage default -- see TasksDashboardApp's identical constant
+// for why (this view has its own separate initial fetch, so the mismatch was independent there).
+const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 
 jahiaComponent(
     {
@@ -21,7 +23,7 @@ jahiaComponent(
         // fetches every subsequent page/mutation itself via plain fetch().
         const {data, errors} = useGQLQuery({
             query: INITIAL_TASK_BOARD_QUERY,
-            variables: {first: PAGE_SIZE}
+            variables: {first: PAGE_SIZE, filterState: NOT_FINISHED_STATES}
         });
 
         if (errors && errors.length > 0) {
