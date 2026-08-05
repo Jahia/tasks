@@ -80,6 +80,51 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
         });
     });
 
+    describe('search', () => {
+        // "zzsearch-" keeps these out of range of any other content the repo-wide query might
+        // see (see the pagination describe block's own comment on why this query isn't site-scoped).
+        const ALPHA = 'zzsearch-alpha-widget';
+        const BETA = 'zzsearch-beta-gadget';
+        const names = [ALPHA, BETA];
+
+        before(() => {
+            addTask(ALPHA, [{name: 'state', value: 'active'}]);
+            addTask(BETA, [{name: 'state', value: 'suspended'}]);
+        });
+
+        after(() => {
+            names.forEach(name => deleteNode(`${TASKS_CONTAINER}/${name}`));
+        });
+
+        it('matches a case-insensitive substring of the title', () => {
+            cy.apollo({queryFile: 'graphql/taskBoard.query.graphql', variables: {first: PAGE_SIZE, search: 'ALPHA-WIDGET'}})
+                .then(({data}) => {
+                    const titles = data.taskBoard.edges.map((edge: {node: {title: string}}) => edge.node.title);
+                    expect(titles).to.include(ALPHA);
+                    expect(titles).to.not.include(BETA);
+                });
+        });
+
+        // TaskBoardQueryExtensions#taskBoard matches search against title, creator, assignee
+        // display name AND state -- this exercises a field other than title.
+        it('also matches against state, not just title', () => {
+            cy.apollo({queryFile: 'graphql/taskBoard.query.graphql', variables: {first: PAGE_SIZE, search: 'suspended'}})
+                .then(({data}) => {
+                    const titles = data.taskBoard.edges.map((edge: {node: {title: string}}) => edge.node.title);
+                    expect(titles).to.include(BETA);
+                    expect(titles).to.not.include(ALPHA);
+                });
+        });
+
+        it('returns nothing for a non-matching search term', () => {
+            cy.apollo({queryFile: 'graphql/taskBoard.query.graphql', variables: {first: PAGE_SIZE, search: 'zzsearch-no-such-task-exists'}})
+                .then(({data}) => {
+                    expect(data.taskBoard.edges).to.have.length(0);
+                    expect(data.taskBoard.totalCount).to.equal(0);
+                });
+        });
+    });
+
     describe('row menu actions', () => {
         beforeEach(() => {
             cy.apolloClient({username: REVIEWER, password: REVIEWER_PASSWORD});
