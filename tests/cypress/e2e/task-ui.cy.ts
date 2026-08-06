@@ -98,3 +98,90 @@ describe('Task board search (rendered UI, via the admin dashboard tile)', () => 
             });
     });
 });
+
+describe('Task board sorting (rendered UI, via the admin dashboard tile)', () => {
+    before(() => {
+        createSite(TEST_SITE_KEY, {templateSet: TEST_TEMPLATE_SET, serverName: TEST_SITE_KEY, locale: 'en'});
+        addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:tasks', name: 'e2e-ui-tasks'});
+        ['Sorttest Apple', 'Sorttest Middle', 'Sorttest Zebra'].forEach((title, index) => {
+            addNode({
+                parentPathOrId: CONTAINER,
+                primaryNodeType: 'jnt:task',
+                name: `ui-sort-${index}`,
+                properties: [
+                    {name: 'jcr:title', value: title, language: 'en'},
+                    {name: 'state', value: 'active'}
+                ]
+            });
+        });
+    });
+
+    after(() => {
+        deleteSite(TEST_SITE_KEY);
+    });
+
+    it('reorders the board when you toggle the sort direction', () => {
+        cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
+        cy.visit('/jahia/dashboard/tasks');
+
+        cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('Sorttest');
+
+        // Board default is sortBy=title, sortOrder=ascending (taskBoard.shared.ts) -- no need to
+        // touch the sort-field dropdown, just confirm the starting order before flipping it.
+        cy.get('.task-board__card-header', {timeout: 30000}).should('have.length', 3).then($headers => {
+            expect([...$headers].map(el => el.innerText.trim())).to.deep.equal([
+                'Sorttest Apple', 'Sorttest Middle', 'Sorttest Zebra'
+            ]);
+        });
+
+        cy.get('[aria-label="Sort descending"]').click();
+
+        cy.get('.task-board__card-header').should('have.length', 3).then($headers => {
+            expect([...$headers].map(el => el.innerText.trim())).to.deep.equal([
+                'Sorttest Zebra', 'Sorttest Middle', 'Sorttest Apple'
+            ]);
+        });
+    });
+});
+
+describe('Task board completion (rendered UI, via the admin dashboard tile)', () => {
+    before(() => {
+        createSite(TEST_SITE_KEY, {templateSet: TEST_TEMPLATE_SET, serverName: TEST_SITE_KEY, locale: 'en'});
+        addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:tasks', name: 'e2e-ui-tasks'});
+        addNode({
+            parentPathOrId: CONTAINER,
+            primaryNodeType: 'jnt:task',
+            name: 'ui-complete-task',
+            properties: [
+                {name: 'jcr:title', value: 'Ship the release notes', language: 'en'},
+                {name: 'state', value: 'started'},
+                {name: 'possibleOutcomes', values: ['publish', 'reject']}
+            ]
+        });
+    });
+
+    after(() => {
+        deleteSite(TEST_SITE_KEY);
+    });
+
+    it('completes a started task via its Publish decision button', () => {
+        cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
+        cy.visit('/jahia/dashboard/tasks');
+
+        cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('Ship the release notes');
+
+        // Started + possibleOutcomes -- outcomeLabel() maps 'publish' to 'Publish' and 'reject'
+        // to 'Reject publication' (TaskBoard.client.tsx).
+        cy.contains('.task-board__card', 'Ship the release notes')
+            .should('contain.text', 'Started')
+            .within(() => {
+                cy.contains('button', 'Reject publication').should('be.visible');
+                cy.contains('button', 'Publish').click();
+            });
+
+        // completeTask sets state to "finished" -- and the dashboard's default filterState
+        // (NOT_FINISHED_STATES, taskBoard.shared.ts) hides finished tasks entirely, so the
+        // card disappears from the board rather than sticking around showing "Finished".
+        cy.contains('.task-board__card', 'Ship the release notes').should('not.exist');
+    });
+});
