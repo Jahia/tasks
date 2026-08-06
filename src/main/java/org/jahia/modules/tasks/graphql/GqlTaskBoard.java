@@ -2,6 +2,7 @@ package org.jahia.modules.tasks.graphql;
 
 import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
+import graphql.annotations.annotationTypes.GraphQLName;
 import graphql.annotations.annotationTypes.GraphQLNonNull;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
@@ -233,6 +234,7 @@ public class GqlTaskBoard {
     }
 
     @GraphQLField
+    @GraphQLName("isAssignableToMe")
     @GraphQLDescription("Whether the current viewer is eligible to self-assign this task (owner-or-candidate), "
             + "independent of canReviewAll -- a reviewer can act on any task regardless of candidacy, but "
             + "\"Assign to me\" for a non-reviewer only makes sense when they're an eligible candidate")

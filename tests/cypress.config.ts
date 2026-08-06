@@ -1,5 +1,5 @@
 import {defineConfig} from 'cypress';
-import registerJahiaPlugins from '@jahia/cypress/dist/plugins/index.js';
+import {registerPlugins} from '@jahia/cypress/dist/plugins/registerPlugins.js';
 
 export default defineConfig({
     reporter: 'junit',
@@ -8,7 +8,8 @@ export default defineConfig({
     },
     e2e: {
         setupNodeEvents(on, config) {
-            return registerJahiaPlugins(on, config);
+            registerPlugins(on, config);
+            return config;
         },
         specPattern: 'cypress/e2e/**/*.cy.ts',
         supportFile: 'cypress/support/e2e.ts'

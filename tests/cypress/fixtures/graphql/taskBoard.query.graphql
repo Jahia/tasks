@@ -1,9 +1,9 @@
 query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String]) {
     taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState) {
-        totalCount
         pageInfo {
             hasNextPage
             endCursor
+            totalCount
         }
         edges {
             node {

@@ -1,4 +1,4 @@
-import {createSite, deleteSite, createUser, deleteUser, addNode, deleteNode} from '@jahia/cypress';
+import {createSite, deleteSite, createUser, deleteUser, addNode, deleteNode, grantRoles, getUserPath} from '@jahia/cypress';
 import {TEST_SITE_KEY, TEST_TEMPLATE_SET} from '../support/constants';
 
 // Covers jnt:createTaskForm's createTask mutation (Phase 2) and the isAssignableToMe field that
@@ -18,6 +18,12 @@ describe('Task list creation (jnt:createTaskForm createTask) and assignability (
         createSite(TEST_SITE_KEY, {templateSet: TEST_TEMPLATE_SET, serverName: TEST_SITE_KEY, locale: 'en'});
         createUser(CANDIDATE, CANDIDATE_PASSWORD);
         createUser(BYSTANDER, BYSTANDER_PASSWORD);
+        // jnt:task/jnt:workflowTask only ever lives in the edit/default workspace (see
+        // TaskBoardQueryExtensions' class comment) -- the standard "reader" role only grants
+        // jcr:read_live, so a plain candidate/bystander needs the hidden "privileged" role
+        // (jcr:read_default) to read the task node at all, regardless of isAssignableToMe.
+        grantRoles('/', ['privileged'], CANDIDATE, 'USER');
+        grantRoles('/', ['privileged'], BYSTANDER, 'USER');
         addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:contentFolder', name: 'e2e-task-list'});
     });
 
@@ -66,36 +72,43 @@ describe('Task list creation (jnt:createTaskForm createTask) and assignability (
 
     describe('isAssignableToMe', () => {
         it('is true for an eligible candidate and false for an uninvolved user', () => {
-            addNode({
-                parentPathOrId: CONTENT_PARENT,
-                primaryNodeType: 'jnt:tasks',
-                name: 'e2e-assignability-tasks'
-            }).then(() => {
+            // Jahia shards user nodes into hashed subfolders (e.g. /users/cd/hc/dg/<username>),
+            // not a flat /users/<username> -- candidates must store the real resolved path, not
+            // a guessed one, or isOwnerOrCandidate's path comparison never matches.
+            getUserPath(CANDIDATE).then(({data}: {data: {admin: {userAdmin: {user: {node: {path: string}}}}}}) => {
+                const candidatePath = data.admin.userAdmin.user.node.path;
+
                 addNode({
-                    parentPathOrId: `${CONTENT_PARENT}/e2e-assignability-tasks`,
-                    primaryNodeType: 'jnt:task',
-                    name: 'candidate-task',
-                    properties: [
-                        {name: 'jcr:title', value: 'candidate-task', language: 'en'},
-                        {name: 'state', value: 'active'},
-                        {name: 'candidates', value: `/users/${CANDIDATE}`}
-                    ]
-                }).then((response: AddNodeResponse) => {
-                    const id = response.data.jcr.addNode.uuid;
+                    parentPathOrId: CONTENT_PARENT,
+                    primaryNodeType: 'jnt:tasks',
+                    name: 'e2e-assignability-tasks'
+                }).then(() => {
+                    addNode({
+                        parentPathOrId: `${CONTENT_PARENT}/e2e-assignability-tasks`,
+                        primaryNodeType: 'jnt:task',
+                        name: 'candidate-task',
+                        properties: [
+                            {name: 'jcr:title', value: 'candidate-task', language: 'en'},
+                            {name: 'state', value: 'active'},
+                            {name: 'candidates', values: [candidatePath]}
+                        ]
+                    }).then((response: AddNodeResponse) => {
+                        const id = response.data.jcr.addNode.uuid;
 
-                    cy.apolloClient({username: CANDIDATE, password: CANDIDATE_PASSWORD});
-                    cy.apollo({queryFile: 'graphql/task.query.graphql', variables: {id}})
-                        .then(({data}) => {
-                            expect(data.task.isAssignableToMe).to.equal(true);
-                        });
+                        cy.apolloClient({username: CANDIDATE, password: CANDIDATE_PASSWORD});
+                        cy.apollo({queryFile: 'graphql/task.query.graphql', variables: {id}})
+                            .then(({data}) => {
+                                expect(data.task.isAssignableToMe).to.equal(true);
+                            });
 
-                    cy.apolloClient({username: BYSTANDER, password: BYSTANDER_PASSWORD});
-                    cy.apollo({queryFile: 'graphql/task.query.graphql', variables: {id}})
-                        .then(({data}) => {
-                            expect(data.task.isAssignableToMe).to.equal(false);
-                        });
+                        cy.apolloClient({username: BYSTANDER, password: BYSTANDER_PASSWORD});
+                        cy.apollo({queryFile: 'graphql/task.query.graphql', variables: {id}})
+                            .then(({data}) => {
+                                expect(data.task.isAssignableToMe).to.equal(false);
+                            });
 
-                    deleteNode(id);
+                        deleteNode(id);
+                    });
                 });
             });
         });

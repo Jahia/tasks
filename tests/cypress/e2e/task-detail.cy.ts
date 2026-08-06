@@ -29,7 +29,7 @@ describe('Task detail (jnt:task updateTaskState / jnt:simpleWorkflow updateTaskD
         createUser(REVIEWER, REVIEWER_PASSWORD);
         // editor-in-chief grants the "publish" permission TaskAuthorizationService#canReviewAllTasks
         // checks, letting this persona act on any task regardless of ownership.
-        grantRoles('/', ['editor-in-chief'], REVIEWER, 'user');
+        grantRoles('/', ['editor-in-chief'], REVIEWER, 'USER');
 
         addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:tasks', name: 'e2e-task-detail'});
     });
@@ -51,7 +51,7 @@ describe('Task detail (jnt:task updateTaskState / jnt:simpleWorkflow updateTaskD
                     mutationFile: 'graphql/updateTaskState.mutation.graphql',
                     variables: {id, state: 'not-a-real-state'}
                 }).then(response => {
-                    expect(response.errors).to.have.length.greaterThan(0);
+                    expect(response.graphQLErrors).to.have.length.greaterThan(0);
                 });
             });
 
@@ -109,7 +109,7 @@ describe('Task detail (jnt:task updateTaskState / jnt:simpleWorkflow updateTaskD
                         mutationFile: 'graphql/updateTaskDataTitle.mutation.graphql',
                         variables: {id: taskDataId, title: 'Updated title'}
                     }).then(({data}) => {
-                        expect(data.updateTaskDataTitle.id).to.equal(taskDataId);
+                        expect(data.updateTaskDataTitle.uuid).to.equal(taskDataId);
                     });
 
                     cy.apollo({queryFile: 'graphql/nodeTitle.query.graphql', variables: {id: taskDataId}})

@@ -13,7 +13,7 @@ const TASKS_CONTAINER = `/sites/${TEST_SITE_KEY}/contents/e2e-tasks`;
 // resolve their "id" argument via session.getNodeByIdentifier(id) server-side, which (per JCR
 // spec) requires a real identifier, not a path. addNode's response shape (data.jcr.addNode.uuid)
 // is confirmed from @jahia/cypress's own addNode.graphql fixture.
-function addTask(name: string, properties: Array<{name: string; value: string; language?: string}>) {
+function addTask(name: string, properties: Array<{name: string; value?: string; values?: string[]; language?: string}>) {
     return addNode({
         parentPathOrId: TASKS_CONTAINER,
         primaryNodeType: 'jnt:task',
@@ -28,7 +28,7 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
         createUser(REVIEWER, REVIEWER_PASSWORD);
         // editor-in-chief is Jahia's standard role granting "publish" -- confirm against the
         // target instance's role set if the reviewer-path assertions below start failing.
-        grantRoles('/', ['editor-in-chief'], REVIEWER, 'user');
+        grantRoles('/', ['editor-in-chief'], REVIEWER, 'USER');
 
         addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:tasks', name: 'e2e-tasks'});
     });
@@ -56,7 +56,7 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                     expect(data.taskBoard.edges).to.have.length(PAGE_SIZE);
                     // Repo-wide query (no site scoping yet, see TaskBoardQueryExtensions' Phase 4
                     // TODO) -- assert a floor, not an exact count, since other content may exist.
-                    expect(data.taskBoard.totalCount).to.be.at.least(TOTAL_TASKS);
+                    expect(data.taskBoard.pageInfo.totalCount).to.be.at.least(TOTAL_TASKS);
                     expect(data.taskBoard.pageInfo.hasNextPage).to.equal(true);
                     expect(data.taskBoard.pageInfo.endCursor).to.be.a('string');
                 });
@@ -120,7 +120,7 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
             cy.apollo({queryFile: 'graphql/taskBoard.query.graphql', variables: {first: PAGE_SIZE, search: 'zzsearch-no-such-task-exists'}})
                 .then(({data}) => {
                     expect(data.taskBoard.edges).to.have.length(0);
-                    expect(data.taskBoard.totalCount).to.equal(0);
+                    expect(data.taskBoard.pageInfo.totalCount).to.equal(0);
                 });
         });
     });
@@ -297,8 +297,7 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
             const name = 'action-complete';
             addTask(name, [
                 {name: 'state', value: 'started'},
-                {name: 'possibleOutcomes', value: 'publish'},
-                {name: 'possibleOutcomes', value: 'reject'}
+                {name: 'possibleOutcomes', values: ['publish', 'reject']}
             ]).then(id => {
                 cy.apollo({
                     mutationFile: 'graphql/completeTask.mutation.graphql',
