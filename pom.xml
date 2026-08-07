@@ -52,7 +52,7 @@
         <version>8.2.1.0</version>
     </parent>
     <artifactId>tasks</artifactId>
-    <version>8.4.0-SNAPSHOT</version>
+    <version>9.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <name>Jahia Tasks</name>
     <description>Jahia template module for leveraging simple user and shared task management, with a React/Moonstone task board view for jnt:currentUserTasks.</description>
@@ -69,7 +69,7 @@
         <jahia-module-type>system</jahia-module-type>
         <jahia-deploy-on-site>system</jahia-deploy-on-site>
         <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
-        <jahia-module-signature>MC0CFQCSiYvnmU9n/raHdxUGTyMk9DdUZwIUDgiRGJ/tFKWU3L2GpeqzbI1gLfk=</jahia-module-signature>
+        <jahia-module-signature>MC0CFQCBIuef+YTEVKKxucrOer8JO5czXwIUZB14BWQdr8jkrOByO+hzKVCJJQU=</jahia-module-signature>
     </properties>
 
     <repositories>
