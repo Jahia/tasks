@@ -28,6 +28,10 @@ jobs:
         with:
           node_version: 22
           auditci_level: critical
+          # tests/ is its own toolchain boundary (own package.json/tsconfig, Cypress globals
+          # the root eslint.config.js deliberately doesn't cover -- see its own ignores comment)
+          # and ships no lint script at all.
+          skip_lint_tests: true
 
   build:
     name: Build Module
