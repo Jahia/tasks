@@ -38,7 +38,10 @@ import java.util.Locale;
  * {@code getHistoryWorkflowTasks(processId, provider, locale)}.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
-public class WorkflowActivityQueryExtensions {
+public final class WorkflowActivityQueryExtensions {
+
+    private WorkflowActivityQueryExtensions() {
+    }
 
     @GraphQLField
     @GraphQLDescription("Live WorkflowService activity (not JCR jnt:task/jnt:workflowTask nodes) for every "
@@ -64,31 +67,42 @@ public class WorkflowActivityQueryExtensions {
         List<GqlWorkflowActivityTask> activeTasks = new ArrayList<>();
         List<GqlWorkflowActivityTask> history = new ArrayList<>();
 
-        List<HistoryWorkflow> processes = workflowService.getHistoryWorkflowsByPath(path + "/%", locale);
-        for (HistoryWorkflow process : processes) {
+        for (HistoryWorkflow process : workflowService.getHistoryWorkflowsByPath(path + "/%", locale)) {
             if (!process.isCompleted()) {
-                Workflow active = workflowService.getWorkflow(process.getProcessId(), process.getProvider(), locale);
-                for (WorkflowAction action : active.getAvailableActions()) {
-                    if (action instanceof WorkflowTask) {
-                        WorkflowTask task = (WorkflowTask) action;
-                        if (task.getDueDate() != null) {
-                            String label = task.getDisplayName() != null ? task.getDisplayName() : task.getName();
-                            activeTasks.add(new GqlWorkflowActivityTask(label, task.getDueDate(), null, process.getNodeId()));
-                        }
-                    }
-                }
+                collectActiveTasks(workflowService, process, locale, activeTasks);
             }
-
-            List<HistoryWorkflowTask> tasks = workflowService.getHistoryWorkflowTasks(
-                    process.getProcessId(), process.getProvider(), locale);
-            for (HistoryWorkflowTask task : tasks) {
-                if (task.getEndTime() != null) {
-                    String label = task.getDisplayOutcome() != null ? task.getDisplayOutcome() : task.getOutcome();
-                    history.add(new GqlWorkflowActivityTask(label, null, task.getEndTime(), process.getNodeId()));
-                }
-            }
+            collectHistoryTasks(workflowService, process, locale, history);
         }
 
         return new GqlWorkflowActivity(activeTasks, history);
+    }
+
+    // Split out of workflowActivity() above to keep its own cognitive complexity down --
+    // one process's currently-available due-dated actions.
+    private static void collectActiveTasks(WorkflowService workflowService, HistoryWorkflow process, Locale locale,
+            List<GqlWorkflowActivityTask> activeTasks) {
+        Workflow active = workflowService.getWorkflow(process.getProcessId(), process.getProvider(), locale);
+        for (WorkflowAction action : active.getAvailableActions()) {
+            if (action instanceof WorkflowTask) {
+                WorkflowTask task = (WorkflowTask) action;
+                if (task.getDueDate() != null) {
+                    String label = task.getDisplayName() != null ? task.getDisplayName() : task.getName();
+                    activeTasks.add(new GqlWorkflowActivityTask(label, task.getDueDate(), null, process.getNodeId()));
+                }
+            }
+        }
+    }
+
+    // Split out of workflowActivity() above -- one process's completed task history entries.
+    private static void collectHistoryTasks(WorkflowService workflowService, HistoryWorkflow process, Locale locale,
+            List<GqlWorkflowActivityTask> history) {
+        List<HistoryWorkflowTask> tasks = workflowService.getHistoryWorkflowTasks(
+                process.getProcessId(), process.getProvider(), locale);
+        for (HistoryWorkflowTask task : tasks) {
+            if (task.getEndTime() != null) {
+                String label = task.getDisplayOutcome() != null ? task.getDisplayOutcome() : task.getOutcome();
+                history.add(new GqlWorkflowActivityTask(label, null, task.getEndTime(), process.getNodeId()));
+            }
+        }
     }
 }

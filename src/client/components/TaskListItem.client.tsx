@@ -26,7 +26,54 @@ type MenuAction = {
     patch: Partial<TaskNode>;
 };
 
-export default function TaskListItem({task: initialTask, currentUserKey, canReviewAll, graphqlEndpoint}: TaskListItemProps) {
+// Split out of buildActions below so the "started" branch's outcome-vs-fallback decision
+// doesn't add its own loop+if nesting to that function's cognitive complexity.
+function buildCompletionActions(task: TaskNode): MenuAction[] {
+    if (task.possibleOutcomes.length > 0) {
+        return task.possibleOutcomes.map(outcome => ({
+            label: outcome,
+            mutation: COMPLETE_TASK_MUTATION,
+            variables: {id: task.id, outcome},
+            patch: {state: 'finished'}
+        }));
+    }
+
+    return [{label: 'Completed', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'finished'}, patch: {state: 'finished'}}];
+}
+
+// Mirrors task.taskList.jsp: every action except "Assign to me" requires being the current
+// assignee, unless the viewer can review all tasks (same gating as TaskBoard's ActionsCell) --
+// a UX nicety, not a guard; every mutation independently re-checks authorization server-side.
+function buildActions(task: TaskNode, canAct: boolean, currentUserKey: string): MenuAction[] {
+    const actions: MenuAction[] = [];
+
+    if (task.state === 'active' && task.isAssignableToMe) {
+        actions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}, patch: {owner: currentUserKey}});
+    }
+
+    // Matches TaskBoard.client.tsx's TaskActions: a suspended task can only be resumed, not
+    // unassigned directly -- Refuse is only offered while active or started.
+    if (canAct && (task.state === 'active' || task.state === 'started')) {
+        actions.push({label: 'Refuse', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
+    }
+
+    if (canAct && task.state === 'active') {
+        actions.push({label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}, patch: {state: 'started'}});
+    }
+
+    if (canAct && task.state === 'started') {
+        actions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'suspended'}});
+        actions.push(...buildCompletionActions(task));
+    }
+
+    if (canAct && task.state === 'suspended') {
+        actions.push({label: 'Continue', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'started'}});
+    }
+
+    return actions;
+}
+
+export default function TaskListItem({task: initialTask, currentUserKey, canReviewAll, graphqlEndpoint}: Readonly<TaskListItemProps>) {
     const [task, setTask] = useState(initialTask);
     const [isBusy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -47,45 +94,8 @@ export default function TaskListItem({task: initialTask, currentUserKey, canRevi
         }
     }, [graphqlEndpoint]);
 
-    // Mirrors task.taskList.jsp: every action except "Assign to me" requires being the current
-    // assignee, unless the viewer can review all tasks (same gating as TaskBoard's ActionsCell) --
-    // a UX nicety, not a guard; every mutation independently re-checks authorization server-side.
     const canAct = task.owner === currentUserKey || canReviewAll;
-    const actions: MenuAction[] = [];
-
-    if (task.state === 'active' && task.isAssignableToMe) {
-        actions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}, patch: {owner: currentUserKey}});
-    }
-
-    // Matches TaskBoard.client.tsx's TaskActions: a suspended task can only be resumed, not
-    // unassigned directly -- Refuse is only offered while active or started.
-    if (canAct && (task.state === 'active' || task.state === 'started')) {
-        actions.push({label: 'Refuse', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
-    }
-
-    if (canAct && task.state === 'active') {
-        actions.push({label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}, patch: {state: 'started'}});
-    }
-
-    if (canAct && task.state === 'started') {
-        actions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'suspended'}});
-        if (task.possibleOutcomes.length > 0) {
-            for (const outcome of task.possibleOutcomes) {
-                actions.push({
-                    label: outcome,
-                    mutation: COMPLETE_TASK_MUTATION,
-                    variables: {id: task.id, outcome},
-                    patch: {state: 'finished'}
-                });
-            }
-        } else {
-            actions.push({label: 'Completed', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'finished'}, patch: {state: 'finished'}});
-        }
-    }
-
-    if (canAct && task.state === 'suspended') {
-        actions.push({label: 'Continue', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'started'}});
-    }
+    const actions = buildActions(task, canAct, currentUserKey);
 
     // Menu requires each top-level child to be a single MenuItem element -- its internal
     // auto-search-threshold check (Menu.tsx) does `children[0].props[...]`, which throws if

@@ -35,6 +35,69 @@ type ScheduleEntry = {
     kind: 'task' | 'active' | 'history';
 };
 
+// Mirrors uiComponents:getBindedComponent(currentNode, renderContext, 'j:bindedComponent') --
+// an explicitly bound component if configured, otherwise the current page's main resource.
+function resolveBoundNode(currentNode: JCRNodeWrapper, mainNode: JCRNodeWrapper): JCRNodeWrapper {
+    if (!currentNode.hasProperty('j:bindedComponent')) {
+        return mainNode;
+    }
+    try {
+        return currentNode.getProperty('j:bindedComponent').getNode() as JCRNodeWrapper;
+    } catch {
+        // Weak reference target no longer exists -- fall back to the main resource.
+        return mainNode;
+    }
+}
+
+// The three sources of schedule entries below are independent of each other -- split out so
+// the main view function's own cognitive complexity stays low.
+
+function buildTaskEntries(taskIds: string[], result: ScheduleQueryResult): ScheduleEntry[] {
+    const entries: ScheduleEntry[] = [];
+    taskIds.forEach((id, index) => {
+        const task = result[`t${index}`] as ScheduleTaskFields | undefined;
+        if (!task || !task.dueDate) {
+            return;
+        }
+
+        if (task.owner === result.taskBoardCurrentUserKey || task.isAssignableToMe) {
+            entries.push({
+                date: new Date(task.dueDate).getTime(),
+                label: task.title ?? 'Untitled task',
+                url: task.targetNode?.url ?? null,
+                kind: 'task'
+            });
+        }
+    });
+    return entries;
+}
+
+function buildActiveEntries(activeTasks: WorkflowActivityEntry[], startDate: Date, endDate: Date): ScheduleEntry[] {
+    const entries: ScheduleEntry[] = [];
+    for (const active of activeTasks) {
+        if (active.dueDate) {
+            const time = new Date(active.dueDate).getTime();
+            if (time > startDate.getTime() && time <= endDate.getTime()) {
+                entries.push({date: time, label: active.label ?? 'Task', url: active.targetNode?.url ?? null, kind: 'active'});
+            }
+        }
+    }
+    return entries;
+}
+
+function buildHistoryEntries(history: WorkflowActivityEntry[], now: Date, endDate: Date): ScheduleEntry[] {
+    const entries: ScheduleEntry[] = [];
+    for (const historyEntry of history) {
+        if (historyEntry.endTime) {
+            const time = new Date(historyEntry.endTime).getTime();
+            if (time >= now.getTime() && time <= endDate.getTime()) {
+                entries.push({date: time, label: historyEntry.label ?? 'Completed', url: historyEntry.targetNode?.url ?? null, kind: 'history'});
+            }
+        }
+    }
+    return entries;
+}
+
 jahiaComponent(
     {
         nodeType: 'jnt:taskSchedule',
@@ -45,16 +108,7 @@ jahiaComponent(
         priority: 10
     },
     (props, {currentNode, mainNode, jcrSession}) => {
-        // Mirrors uiComponents:getBindedComponent(currentNode, renderContext, 'j:bindedComponent') --
-        // an explicitly bound component if configured, otherwise the current page's main resource.
-        let boundNode: JCRNodeWrapper = mainNode;
-        if (currentNode.hasProperty('j:bindedComponent')) {
-            try {
-                boundNode = currentNode.getProperty('j:bindedComponent').getNode() as JCRNodeWrapper;
-            } catch {
-                // Weak reference target no longer exists -- fall back to the main resource.
-            }
-        }
+        const boundNode = resolveBoundNode(currentNode, mainNode);
 
         const now = new Date();
         const startDate = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
@@ -98,48 +152,18 @@ jahiaComponent(
             variables: {workflowPath: mainNode.getPath()}
         });
 
-        if (errors && errors.length > 0) {
+        if (errors?.length) {
             console.error('[tasks] task schedule query failed:', errors.map(error => error.message).join('; '));
             return <div className="task-schedule task-schedule--error">Unable to load the task schedule. Check the server log for details.</div>;
         }
 
         const result = data as ScheduleQueryResult;
 
-        const entries: ScheduleEntry[] = [];
-
-        taskIds.forEach((id, index) => {
-            const task = result[`t${index}`] as ScheduleTaskFields | undefined;
-            if (!task || !task.dueDate) {
-                return;
-            }
-
-            if (task.owner === result.taskBoardCurrentUserKey || task.isAssignableToMe) {
-                entries.push({
-                    date: new Date(task.dueDate).getTime(),
-                    label: task.title ?? 'Untitled task',
-                    url: task.targetNode?.url ?? null,
-                    kind: 'task'
-                });
-            }
-        });
-
-        for (const active of result.workflowActivity.activeTasks) {
-            if (active.dueDate) {
-                const time = new Date(active.dueDate).getTime();
-                if (time > startDate.getTime() && time <= endDate.getTime()) {
-                    entries.push({date: time, label: active.label ?? 'Task', url: active.targetNode?.url ?? null, kind: 'active'});
-                }
-            }
-        }
-
-        for (const historyEntry of result.workflowActivity.history) {
-            if (historyEntry.endTime) {
-                const time = new Date(historyEntry.endTime).getTime();
-                if (time >= now.getTime() && time <= endDate.getTime()) {
-                    entries.push({date: time, label: historyEntry.label ?? 'Completed', url: historyEntry.targetNode?.url ?? null, kind: 'history'});
-                }
-            }
-        }
+        const entries: ScheduleEntry[] = [
+            ...buildTaskEntries(taskIds, result),
+            ...buildActiveEntries(result.workflowActivity.activeTasks, startDate, endDate),
+            ...buildHistoryEntries(result.workflowActivity.history, now, endDate)
+        ];
 
         entries.sort((a, b) => a.date - b.date);
 
@@ -149,8 +173,8 @@ jahiaComponent(
 
         return (
             <ul className="task-schedule">
-                {entries.map((entry, index) => (
-                    <li key={index} className={`task-schedule__entry task-schedule__entry--${entry.kind}`}>
+                {entries.map(entry => (
+                    <li key={`${entry.kind}-${entry.date}-${entry.label}`} className={`task-schedule__entry task-schedule__entry--${entry.kind}`}>
                         <span className="task-schedule__date">{new Date(entry.date).toLocaleDateString()}</span>
                         {entry.url ? <a href={entry.url}>{entry.label}</a> : <span>{entry.label}</span>}
                     </li>

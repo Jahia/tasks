@@ -6,7 +6,7 @@ import {TasksDashboardApp} from './TasksDashboardApp';
 // personal-api-tokens' own init.js), but @jahia/ui-extender's own Window.jahia type declares
 // only { ui: {...} } (see its IframeRenderer.d.ts) -- re-declaring the global here to add
 // i18n would conflict with that existing declaration, so this casts locally instead.
-const jahiaGlobal = window as unknown as {jahia?: {i18n?: {loadNamespaces: (namespace: string) => void}}};
+const jahiaGlobal = globalThis as unknown as {jahia?: {i18n?: {loadNamespaces: (namespace: string) => void}}};
 
 // jahia-dashboard's own built-in 'tasks' adminRoute (dashboard:50, see
 // jahia-dashboard/src/javascript/Dashboard/Dashboard.adminRoute.jsx) iframes to
@@ -37,7 +37,7 @@ const jahiaGlobal = window as unknown as {jahia?: {i18n?: {loadNamespaces: (name
 // (A previous 'route'/'dashboard:10' registration here, mounting a standalone TasksDashboardApp,
 // was dead code: type 'route' is only ever consumed for 'main:N' targets by jahia-dashboard's own
 // routeDashboard registration -- 'dashboard:N' targets are read exclusively as type 'adminRoute'.)
-export default function () {
+export default function initTasksAdminRoute() {
     // The namespace here IS the URL segment app-shell's i18next backend fetches from
     // (loadPath in app-shell's i18n.js: `/modules/${namespace}/javascript/locales/${lang}.json`,
     // see e.g. personal-api-tokens' own locales/en.json at that exact module-relative path) --

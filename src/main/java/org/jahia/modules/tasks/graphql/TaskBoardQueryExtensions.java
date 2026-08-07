@@ -42,7 +42,7 @@ import java.util.stream.StreamSupport;
  * parameterized query, with pagination as real GraphQL (Relay connection) args
  * instead of the legacy list-rendering pipeline.
  *
- * <p>TODO(Phase 4): scoped to the whole repository for now (no site/path filter);
+ * <p>Known limitation (Phase 4): scoped to the whole repository for now (no site/path filter);
  * revisit once the per-site visibility story for jnt:workflowTask is confirmed
  * against a real deployment.
  *
@@ -55,7 +55,10 @@ import java.util.stream.StreamSupport;
  * return zero tasks even though they exist.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
-public class TaskBoardQueryExtensions {
+public final class TaskBoardQueryExtensions {
+
+    private TaskBoardQueryExtensions() {
+    }
 
     // Raw JCR-SQL2-orderable properties -- the fallback/default ordering (still applied at the
     // query level) for whichever of these isn't superseded by RESOLVED_VALUE_SORT_FIELDS below.
@@ -68,8 +71,10 @@ public class TaskBoardQueryExtensions {
     // assigneeUserKey/jcr:createdBy are paths/user keys -- neither is what's shown (or would sort
     // correctly) in the UI, so these are sorted in-memory, after the query, instead of via
     // JCR-SQL2's "order by".
+    private static final String STATE_FIELD = "state";
+
     private static final Set<String> RESOLVED_VALUE_SORT_FIELDS = new HashSet<>(Arrays.asList(
-            "title", "creator", "owner", "state"));
+            "title", "creator", "owner", STATE_FIELD));
 
     @GraphQLField
     @GraphQLConnection(connectionFetcher = DXPaginatedDataConnectionFetcher.class)
@@ -120,19 +125,7 @@ public class TaskBoardQueryExtensions {
             bindValues.add(session.getValueFactory().createValue(user.getName()));
         }
 
-        if (filterState != null && !filterState.isEmpty()) {
-            statement.append(" and (");
-            for (int i = 0; i < filterState.size(); i++) {
-                if (i > 0) {
-                    statement.append(" or ");
-                }
-                String bindName = "state" + i;
-                statement.append("task.state = $").append(bindName);
-                bindNames.add(bindName);
-                bindValues.add(session.getValueFactory().createValue(filterState.get(i)));
-            }
-            statement.append(")");
-        }
+        appendStateFilter(statement, filterState, bindNames, bindValues, session);
 
         boolean ascending = "asc".equalsIgnoreCase(sortOrder) || "ascending".equalsIgnoreCase(sortOrder);
 
@@ -158,13 +151,7 @@ public class TaskBoardQueryExtensions {
         // path, neither of which is what the search box's placeholder promises to match against),
         // so this filters the same per-row values getTitle()/getAssigneeDisplayName() already
         // compute for display, after the JCR query, rather than against the raw stored properties.
-        if (search != null && !search.trim().isEmpty()) {
-            String needle = search.trim().toLowerCase();
-            stream = stream.filter(task -> containsIgnoreCase(task.getTitle(), needle)
-                    || containsIgnoreCase(task.getCreator(), needle)
-                    || containsIgnoreCase(task.getAssigneeDisplayName(), needle)
-                    || containsIgnoreCase(task.getState(), needle));
-        }
+        stream = applySearch(stream, search);
 
         if (RESOLVED_VALUE_SORT_FIELDS.contains(sortBy)) {
             // Comparator.comparing(valueOf, ...) would call valueOf on every pairwise comparison
@@ -182,6 +169,41 @@ public class TaskBoardQueryExtensions {
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
     }
 
+    // Split out of taskBoard() above to keep its own cognitive complexity down -- appends the
+    // "and (task.state = $state0 or task.state = $state1 or ...)" clause plus its bind values,
+    // one bind variable per requested state (identical bind-by-value approach as the userKey/
+    // userName scoping above, so a state value can never be interpreted as SQL).
+    private static void appendStateFilter(StringBuilder statement, List<String> filterState,
+            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        if (filterState == null || filterState.isEmpty()) {
+            return;
+        }
+        statement.append(" and (");
+        for (int i = 0; i < filterState.size(); i++) {
+            if (i > 0) {
+                statement.append(" or ");
+            }
+            String bindName = STATE_FIELD + i;
+            statement.append("task.state = $").append(bindName);
+            bindNames.add(bindName);
+            bindValues.add(session.getValueFactory().createValue(filterState.get(i)));
+        }
+        statement.append(")");
+    }
+
+    // Split out of taskBoard() above -- the search box's case-insensitive substring match against
+    // every resolved (not raw-property) value the board displays.
+    private static Stream<GqlTaskBoard> applySearch(Stream<GqlTaskBoard> stream, String search) {
+        if (search == null || search.trim().isEmpty()) {
+            return stream;
+        }
+        String needle = search.trim().toLowerCase();
+        return stream.filter(task -> containsIgnoreCase(task.getTitle(), needle)
+                || containsIgnoreCase(task.getCreator(), needle)
+                || containsIgnoreCase(task.getAssigneeDisplayName(), needle)
+                || containsIgnoreCase(task.getState(), needle));
+    }
+
     private static boolean containsIgnoreCase(String value, String lowercaseNeedle) {
         return value != null && value.toLowerCase().contains(lowercaseNeedle);
     }
@@ -194,7 +216,7 @@ public class TaskBoardQueryExtensions {
                 return GqlTaskBoard::getCreator;
             case "owner":
                 return GqlTaskBoard::getAssigneeDisplayName;
-            case "state":
+            case STATE_FIELD:
                 return GqlTaskBoard::getState;
             default:
                 // Unreachable: only called when RESOLVED_VALUE_SORT_FIELDS.contains(sortBy).

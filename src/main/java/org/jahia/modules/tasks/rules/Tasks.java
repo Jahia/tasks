@@ -70,6 +70,9 @@ import java.util.List;
 public class Tasks {
     private transient static Logger logger = LoggerFactory.getLogger(Tasks.class);
 
+    private static final String MY_TASKS_NODE_NAME = "my-tasks";
+    private static final String PAGECONTENT_NODE_NAME = "pagecontent";
+
     private static Tasks instance;
 
     private Tasks() {
@@ -108,12 +111,12 @@ public class Tasks {
             return false;
         }
 
-        JCRNodeWrapper pagecontent = userNode.hasNode("pagecontent")
-                ? userNode.getNode("pagecontent")
-                : userNode.addNode("pagecontent", "jnt:contentList");
-        JCRNodeWrapper myTasks = pagecontent.hasNode("my-tasks")
-                ? pagecontent.getNode("my-tasks")
-                : pagecontent.addNode("my-tasks", "jnt:contentList");
+        JCRNodeWrapper pagecontent = userNode.hasNode(PAGECONTENT_NODE_NAME)
+                ? userNode.getNode(PAGECONTENT_NODE_NAME)
+                : userNode.addNode(PAGECONTENT_NODE_NAME, "jnt:contentList");
+        JCRNodeWrapper myTasks = pagecontent.hasNode(MY_TASKS_NODE_NAME)
+                ? pagecontent.getNode(MY_TASKS_NODE_NAME)
+                : pagecontent.addNode(MY_TASKS_NODE_NAME, "jnt:contentList");
 
         // Mirrors the "tasks" contentTemplate's own default currentUserTasks node
         // (src/main/import/repository.xml) -- keep the two in sync if either changes.

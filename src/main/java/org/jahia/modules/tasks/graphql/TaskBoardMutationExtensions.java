@@ -29,7 +29,19 @@ import java.util.List;
  * real workflow it represents fall out of sync.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Mutation.class)
-public class TaskBoardMutationExtensions {
+public final class TaskBoardMutationExtensions {
+
+    private TaskBoardMutationExtensions() {
+    }
+
+    // Every state value jnt:task/jnt:workflowTask's own choicelist declares (plus "cancelled",
+    // see ALLOWED_STATES below), each used at multiple sites in this class.
+    private static final String PROPERTY_STATE = "state";
+    private static final String STATE_ACTIVE = "active";
+    private static final String STATE_STARTED = "started";
+    private static final String STATE_SUSPENDED = "suspended";
+    private static final String STATE_FINISHED = "finished";
+    private static final String STATE_CANCELLED = "cancelled";
 
     @GraphQLField
     @GraphQLDescription("Assign an active, not-yet-assigned-to-you task to yourself")
@@ -39,7 +51,7 @@ public class TaskBoardMutationExtensions {
         JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
 
-        if (!"active".equals(task.getPropertyAsString("state"))) {
+        if (!STATE_ACTIVE.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only an active task can be assigned");
         }
         TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
@@ -69,7 +81,7 @@ public class TaskBoardMutationExtensions {
         requireCanAct(task, user, session);
 
         task.setProperty("assigneeUserKey", "");
-        task.setProperty("state", "active");
+        task.setProperty(PROPERTY_STATE, STATE_ACTIVE);
         session.save();
         return new GqlTaskBoard(task);
     }
@@ -83,10 +95,10 @@ public class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        if (!"started".equals(task.getPropertyAsString("state"))) {
+        if (!STATE_STARTED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a started task can be suspended");
         }
-        task.setProperty("state", "suspended");
+        task.setProperty(PROPERTY_STATE, STATE_SUSPENDED);
         session.save();
         return new GqlTaskBoard(task);
     }
@@ -100,10 +112,10 @@ public class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        if (!"suspended".equals(task.getPropertyAsString("state"))) {
+        if (!STATE_SUSPENDED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a suspended task can be resumed");
         }
-        task.setProperty("state", "started");
+        task.setProperty(PROPERTY_STATE, STATE_STARTED);
         session.save();
         return new GqlTaskBoard(task);
     }
@@ -118,7 +130,7 @@ public class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        if (!"started".equals(task.getPropertyAsString("state"))) {
+        if (!STATE_STARTED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a started task can be completed");
         }
         if (!GqlTaskBoard.readPossibleOutcomes(task).contains(outcome)) {
@@ -129,7 +141,7 @@ public class TaskBoardMutationExtensions {
         // the Drools rule reads finalOutcome off this same node when it reacts to the
         // state change, so both writes need to land together in one session.save().
         task.setProperty("finalOutcome", outcome);
-        task.setProperty("state", "finished");
+        task.setProperty(PROPERTY_STATE, STATE_FINISHED);
         session.save();
         return new GqlTaskBoard(task);
     }
@@ -137,7 +149,8 @@ public class TaskBoardMutationExtensions {
     // Not part of the enum choicelist in definitions.cnd (only active/started/finished/suspended
     // are), but the legacy task.jsp detail view has always let a plain jnt:task be moved to
     // "cancelled" directly (with no outcome) alongside the CND-declared states -- preserved here.
-    private static final List<String> ALLOWED_STATES = Arrays.asList("active", "started", "suspended", "finished", "cancelled");
+    private static final List<String> ALLOWED_STATES =
+            Arrays.asList(STATE_ACTIVE, STATE_STARTED, STATE_SUSPENDED, STATE_FINISHED, STATE_CANCELLED);
 
     @GraphQLField
     @GraphQLDescription("Directly set a task's state (active, started, suspended, finished, cancelled) with no "
@@ -145,7 +158,7 @@ public class TaskBoardMutationExtensions {
             + "as opposed to completeTask's outcome-driven workflow completion")
     public static GqlTaskBoard updateTaskState(
             @GraphQLName("id") @GraphQLNonNull String id,
-            @GraphQLName("state") @GraphQLNonNull String state) throws RepositoryException {
+            @GraphQLName(PROPERTY_STATE) @GraphQLNonNull String state) throws RepositoryException {
         if (!ALLOWED_STATES.contains(state)) {
             throw new TaskGraphQLException("\"" + state + "\" is not a valid task state");
         }
@@ -154,7 +167,7 @@ public class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        task.setProperty("state", state);
+        task.setProperty(PROPERTY_STATE, state);
         session.save();
         return new GqlTaskBoard(task);
     }

@@ -52,11 +52,11 @@ public class TaskAuthorizationService {
      * as the reviewer-capability proxy, since publication approval is exactly what
      * "review all tasks" is standing in for here.
      *
-     * <p>TODO(Phase 4): this checks a single, caller-supplied scope node. Once tasks
+     * <p>Known limitation (Phase 4): this checks a single, caller-supplied scope node. Once tasks
      * are queried across multiple sites, this needs to become a per-task (or
      * per-site) check rather than one global grant.
      */
-    public boolean canReviewAllTasks(JCRNodeWrapper scopeNode) throws RepositoryException {
+    public boolean canReviewAllTasks(JCRNodeWrapper scopeNode) {
         return scopeNode.hasPermission("publish");
     }
 
@@ -99,7 +99,7 @@ public class TaskAuthorizationService {
      * complete, ...) on {@code taskNode}: either they are its assignee, or they hold the
      * review role that already grants visibility into every task on the board.
      */
-    public boolean canActOnTask(JCRNodeWrapper taskNode, JahiaUser user, JCRNodeWrapper scopeNode) throws RepositoryException {
+    public boolean canActOnTask(JCRNodeWrapper taskNode, JahiaUser user, JCRNodeWrapper scopeNode) {
         return isAssignee(taskNode, user) || canReviewAllTasks(scopeNode);
     }
 }

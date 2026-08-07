@@ -46,7 +46,7 @@ export default function CreateTaskForm({
     findUserRoles,
     mainResourcePath,
     graphqlEndpoint
-}: CreateTaskFormProps) {
+}: Readonly<CreateTaskFormProps>) {
     const [isOpen, setOpen] = useState(false);
     const [isBusy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -100,7 +100,7 @@ export default function CreateTaskForm({
             });
             // Matches the legacy form's jcrRedirectTo full-page reload -- the simplest way for any
             // task list elsewhere on this page to pick up the newly created task.
-            window.location.reload();
+            globalThis.location.reload();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to create this task.');
             setBusy(false);

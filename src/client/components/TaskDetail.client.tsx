@@ -10,7 +10,7 @@ type TaskDetailProps = {
     graphqlEndpoint: string;
 };
 
-export default function TaskDetail({task: initialTask, canModify, graphqlEndpoint}: TaskDetailProps) {
+export default function TaskDetail({task: initialTask, canModify, graphqlEndpoint}: Readonly<TaskDetailProps>) {
     const [task, setTask] = useState(initialTask);
     const [isBusy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);

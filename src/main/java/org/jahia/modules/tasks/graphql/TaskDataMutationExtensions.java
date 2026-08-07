@@ -23,7 +23,10 @@ import javax.jcr.RepositoryException;
  * beyond requiring a real (non-guest) session.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Mutation.class)
-public class TaskDataMutationExtensions {
+public final class TaskDataMutationExtensions {
+
+    private TaskDataMutationExtensions() {
+    }
 
     @GraphQLField
     @GraphQLDescription("Update the title of a task's taskData child node (e.g. a jnt:simpleWorkflow)")

@@ -21,7 +21,12 @@ import javax.jcr.RepositoryException;
  * enforcement, same as the legacy contribute-mode POST handler relied on.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Mutation.class)
-public class TaskListMutationExtensions {
+public final class TaskListMutationExtensions {
+
+    private TaskListMutationExtensions() {
+    }
+
+    private static final String TASKS_NODE_NAME = "tasks";
 
     @GraphQLField
     @GraphQLDescription("Create a new jnt:task under parentPath (auto-creating the jnt:tasks container child if "
@@ -41,9 +46,9 @@ public class TaskListMutationExtensions {
         TaskAuthorizationService.requireNonGuest(session);
 
         JCRNodeWrapper parent = session.getNode(parentPath);
-        JCRNodeWrapper tasksContainer = parent.hasNode("tasks")
-                ? parent.getNode("tasks")
-                : parent.addNode("tasks", "jnt:tasks");
+        JCRNodeWrapper tasksContainer = parent.hasNode(TASKS_NODE_NAME)
+                ? parent.getNode(TASKS_NODE_NAME)
+                : parent.addNode(TASKS_NODE_NAME, "jnt:tasks");
 
         // JCRContentUtils.findAvailableNodeName also increments an existing trailing "-N" suffix
         // instead of always appending a new one, and truncates against the configured max node

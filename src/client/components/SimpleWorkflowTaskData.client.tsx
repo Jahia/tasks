@@ -9,7 +9,7 @@ type SimpleWorkflowTaskDataProps = {
     graphqlEndpoint: string;
 };
 
-export default function SimpleWorkflowTaskData({id, title: initialTitle, graphqlEndpoint}: SimpleWorkflowTaskDataProps) {
+export default function SimpleWorkflowTaskData({id, title: initialTitle, graphqlEndpoint}: Readonly<SimpleWorkflowTaskDataProps>) {
     const [title, setTitle] = useState(initialTitle ?? '');
     const [savedTitle, setSavedTitle] = useState(initialTitle ?? '');
     const [isBusy, setBusy] = useState(false);

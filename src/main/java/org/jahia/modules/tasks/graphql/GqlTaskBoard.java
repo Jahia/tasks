@@ -63,15 +63,17 @@ public class GqlTaskBoard {
     @GraphQLField
     @GraphQLDescription("Task title")
     public String getTitle() {
-        // Workflow-created tasks store jcr:title as "##resourceBundle(key,bundle)## : <page name>"
-        // (see core's JBPMTaskLifeCycleEventListener -- key is the workflow step, e.g. "review";
-        // the suffix after "##" is the target content's display name, appended as literal text,
-        // not part of the macro). Core's own Messages#interpolateResourceBundleMacro only resolves
-        // a macro that is the ENTIRE input (it matches with Matcher#matches()), so it can't be
-        // called on this title directly -- it would just return it unchanged, macro and all. This
-        // extracts just the "##resourceBundle(...)##" substring, resolves that through the same
-        // core utility, and splices the result back into the surrounding literal text. Plain
-        // jnt:task titles (no macro at all) pass through unchanged.
+        // Workflow-created tasks store jcr:title as a "##resourceBundle##" macro -- taking a
+        // resource key and a bundle name as its two arguments -- followed by literal text of the
+        // form " : <page name>" (see core's JBPMTaskLifeCycleEventListener -- the key is the
+        // workflow step, e.g. "review"; the suffix after the macro is the target content's display
+        // name, appended as literal text, not part of the macro itself). Core's own
+        // Messages#interpolateResourceBundleMacro only resolves a macro that is the ENTIRE input
+        // (it matches with Matcher#matches()), so it can't be called on this title directly -- it
+        // would just return it unchanged, macro and all. This extracts just the resource-bundle
+        // macro substring, resolves that through the same core utility, and splices the result
+        // back into the surrounding literal text. Plain jnt:task titles (no macro at all) pass
+        // through unchanged.
         String title = node.getPropertyAsString("jcr:title");
         if (title == null) {
             return null;
@@ -270,7 +272,7 @@ public class GqlTaskBoard {
             // instead of ours).
             JCRSessionWrapper localizedSession = JCRSessionFactory.getInstance()
                     .getCurrentUserSession(Constants.EDIT_WORKSPACE, JahiaLocaleContextHolder.getLocale());
-            return new GqlJcrNodeImpl((JCRNodeWrapper) localizedSession.getNodeByIdentifier(renderable.getIdentifier()));
+            return new GqlJcrNodeImpl(localizedSession.getNodeByIdentifier(renderable.getIdentifier()));
         } catch (ItemNotFoundException e) {
             // Weak reference target no longer exists.
             return null;

@@ -111,7 +111,7 @@ type TaskActionsProps = {
 // always-on-screen buttons now instead of a 3-dot menu. TaskBoardMutationExtensions
 // independently re-checks every one of these server-side and is the real security boundary; a
 // wrong guess here just surfaces as an error banner.
-function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: TaskActionsProps) {
+function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
     const canAct = task.owner === currentUserKey || canReviewAll;
     const targetUrl = task.targetNode?.url;
     // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
@@ -130,11 +130,15 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Tas
         primaryActions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
     } else if (canAct && task.state === 'active') {
         // Assigned, not started yet.
-        primaryActions.push({label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}});
-        primaryActions.push({label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}});
+        primaryActions.push(
+            {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
+        );
     } else if (canAct && task.state === 'started') {
-        primaryActions.push({label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}});
-        primaryActions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}});
+        primaryActions.push(
+            {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
+        );
         showPreview = true;
         // Reject publication before Publish, matching the requested layout order, regardless of
         // the order possibleOutcomes happens to list them in (workflow-definition-specific).
@@ -155,9 +159,9 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Tas
     return (
         <div className="task-board__actions">
             <div className="task-board__actions-row">
-                {primaryActions.map((action, index) => (
+                {primaryActions.map(action => (
                     <Button
-                        key={`primary-${index}`}
+                        key={action.mutation}
                         label={action.label}
                         size="small"
                         isDisabled={isBusy}
@@ -176,9 +180,9 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Tas
             </div>
             {decisionActions.length > 0 && (
                 <div className="task-board__actions-row task-board__actions-row--decisions">
-                    {decisionActions.map((action, index) => (
+                    {decisionActions.map(action => (
                         <Button
-                            key={`decision-${index}`}
+                            key={String(action.variables.outcome)}
                             label={action.label}
                             size="small"
                             color="accent"
@@ -200,7 +204,7 @@ type TaskCardProps = {
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
 };
 
-function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: TaskCardProps) {
+function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
     // The workflow-engine-derived summary (TaskBoardQueryExtensions#getWorkflowSummary) is only
@@ -251,7 +255,7 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: TaskCa
     );
 }
 
-export default function TaskBoard({initialConnection, graphqlEndpoint, currentUserKey, canReviewAll}: TaskBoardProps) {
+export default function TaskBoard({initialConnection, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
     const [currentPage, setCurrentPage] = useState(1);
     const [connection, setConnection] = useState(initialConnection);
     const [isLoading, setLoading] = useState(false);
@@ -346,6 +350,28 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
 
     const rows = connection.edges.map(edge => edge.node);
 
+    let boardContent;
+    if (isLoading) {
+        boardContent = <Loader/>;
+    } else if (rows.length === 0) {
+        boardContent = <EmptyData message="No tasks to show."/>;
+    } else {
+        boardContent = (
+            <div className="task-board__list">
+                {rows.map(task => (
+                    <TaskCard
+                        key={task.id}
+                        task={task}
+                        currentUserKey={currentUserKey}
+                        canReviewAll={canReviewAll}
+                        isBusy={busyTaskId === task.id}
+                        onAction={handleAction}
+                    />
+                ))}
+            </div>
+        );
+    }
+
     return (
         <ContentLayout
             paper
@@ -392,24 +418,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                             {error}
                         </Banner>
                     )}
-                    {isLoading ? (
-                        <Loader/>
-                    ) : rows.length === 0 ? (
-                        <EmptyData message="No tasks to show."/>
-                    ) : (
-                        <div className="task-board__list">
-                            {rows.map(task => (
-                                <TaskCard
-                                    key={task.id}
-                                    task={task}
-                                    currentUserKey={currentUserKey}
-                                    canReviewAll={canReviewAll}
-                                    isBusy={busyTaskId === task.id}
-                                    onAction={handleAction}
-                                />
-                            ))}
-                        </div>
-                    )}
+                    {boardContent}
                     {!isLoading && rows.length > 0 && (
                         <Pagination
                             currentPage={currentPage}
