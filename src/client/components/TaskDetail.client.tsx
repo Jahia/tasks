@@ -1,7 +1,7 @@
 import {useCallback, useState} from 'react';
 import {Banner, Button} from '@jahia/moonstone';
 import {callGraphQL} from '../lib/graphqlClient';
-import {UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import type {TaskNode} from './task.shared';
 
 type TaskDetailProps = {
@@ -9,14 +9,6 @@ type TaskDetailProps = {
     canModify: boolean;
     graphqlEndpoint: string;
 };
-
-function capitalize(value: string | null): string {
-    if (!value) {
-        return 'Unknown';
-    }
-
-    return value.charAt(0).toUpperCase() + value.slice(1);
-}
 
 export default function TaskDetail({task: initialTask, canModify, graphqlEndpoint}: TaskDetailProps) {
     const [task, setTask] = useState(initialTask);

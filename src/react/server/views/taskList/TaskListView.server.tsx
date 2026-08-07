@@ -1,11 +1,6 @@
 import {jahiaComponent, Render, getNodesByJCRQuery} from '@jahia/javascript-modules-library';
 import type {JCRNodeWrapper} from 'org.jahia.services.content';
-
-// Escapes a value for safe interpolation into a JCR-SQL2 string literal (doubles single quotes) --
-// mirrors functions:sqlencode from the legacy JSP / JCRContentUtils.sqlEncode server-side.
-function sqlEncode(value: string): string {
-    return value.replace(/'/g, "''");
-}
+import {sqlEncode} from '../../lib/jcrSql2';
 
 jahiaComponent(
     {

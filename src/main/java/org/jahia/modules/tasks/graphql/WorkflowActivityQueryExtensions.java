@@ -8,6 +8,8 @@ import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.services.content.JCRSessionFactory;
+import org.jahia.services.content.JCRSessionWrapper;
+import org.jahia.services.usermanager.JahiaUserManagerService;
 import org.jahia.services.workflow.HistoryWorkflow;
 import org.jahia.services.workflow.HistoryWorkflowTask;
 import org.jahia.services.workflow.Workflow;
@@ -43,10 +45,20 @@ public class WorkflowActivityQueryExtensions {
             + "workflow process tracked under path: active due-dated tasks and completed task history")
     public static GqlWorkflowActivity workflowActivity(
             @GraphQLName("path") @GraphQLNonNull String path) throws RepositoryException {
-        // Only the locale is read off this session (WorkflowService's own API takes the path/id
-        // args directly) -- pinned to the edit workspace for consistency with every other query
-        // in this module; see TaskBoardQueryExtensions' class comment for why.
-        Locale locale = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE).getLocale();
+        // Pinned to the edit workspace for consistency with every other query in this module; see
+        // TaskBoardQueryExtensions' class comment for why.
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
+        if (JahiaUserManagerService.isGuest(session.getUser())) {
+            throw new TaskGraphQLException("You must be logged in to view workflow activity");
+        }
+        // WorkflowService.getHistoryWorkflowsByPath queries the workflow engine's own process
+        // store directly, bypassing JCR read-ACLs entirely -- resolving path through the caller's
+        // own session first re-applies that enforcement (a non-existent or unreadable path throws
+        // PathNotFoundException, same as getNodeByIdentifier does for task(id) above) instead of
+        // letting an arbitrary caller-supplied path (e.g. "/sites") disclose every site's workflow
+        // activity regardless of whether they can read that content.
+        session.getNode(path);
+        Locale locale = session.getLocale();
         WorkflowService workflowService = WorkflowService.getInstance();
 
         List<GqlWorkflowActivityTask> activeTasks = new ArrayList<>();

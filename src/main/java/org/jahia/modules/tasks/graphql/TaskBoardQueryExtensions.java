@@ -12,7 +12,6 @@ import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
 import org.jahia.modules.graphql.provider.dxm.relay.DXPaginatedData;
 import org.jahia.modules.graphql.provider.dxm.relay.DXPaginatedDataConnectionFetcher;
 import org.jahia.modules.graphql.provider.dxm.relay.PaginationHelper;
-import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeIteratorWrapper;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
@@ -24,12 +23,13 @@ import org.jahia.services.usermanager.JahiaUserManagerService;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import javax.jcr.query.Query;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -102,10 +102,7 @@ public class TaskBoardQueryExtensions {
             return PaginationHelper.paginate(Stream.empty(), n -> "", paginationArguments);
         }
 
-        TaskAuthorizationService authorizationService = Objects.requireNonNull(
-                BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
-                "TaskAuthorizationService OSGi service is not available");
-        boolean canReviewAll = authorizationService.canReviewAllTasks(session.getNode("/"));
+        boolean canReviewAll = TaskAuthorizationService.get().canReviewAllTasks(session.getNode("/"));
 
         List<String> bindNames = new ArrayList<>();
         List<Value> bindValues = new ArrayList<>();
@@ -170,8 +167,16 @@ public class TaskBoardQueryExtensions {
         }
 
         if (RESOLVED_VALUE_SORT_FIELDS.contains(sortBy)) {
+            // Comparator.comparing(valueOf, ...) would call valueOf on every pairwise comparison
+            // during the sort (O(n log n) calls) -- for "owner" that's a repeated JCR node lookup
+            // (getAssigneeDisplayName) per comparison for the same n values. Computing each
+            // element's sort key once up front (a Schwartzian transform) makes the extractor run
+            // exactly once per row instead.
             Function<GqlTaskBoard, String> valueOf = resolvedValueExtractor(sortBy);
-            stream = stream.sorted(Comparator.comparing(valueOf, resolvedValueComparator(ascending)));
+            Comparator<String> keyComparator = resolvedValueComparator(ascending);
+            stream = stream.map(task -> new AbstractMap.SimpleEntry<>(valueOf.apply(task), task))
+                    .sorted(Comparator.comparing(Map.Entry::getKey, keyComparator))
+                    .map(Map.Entry::getValue);
         }
 
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
@@ -231,9 +236,6 @@ public class TaskBoardQueryExtensions {
     @GraphQLDescription("Whether the current viewer can act on every task on the board, not just their own")
     public static boolean taskBoardCanReviewAll() throws RepositoryException {
         JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
-        TaskAuthorizationService authorizationService = Objects.requireNonNull(
-                BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
-                "TaskAuthorizationService OSGi service is not available");
-        return authorizationService.canReviewAllTasks(session.getNode("/"));
+        return TaskAuthorizationService.get().canReviewAllTasks(session.getNode("/"));
     }
 }

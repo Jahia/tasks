@@ -57,7 +57,9 @@ export default function TaskListItem({task: initialTask, currentUserKey, canRevi
         actions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}, patch: {owner: currentUserKey}});
     }
 
-    if (canAct && (task.state === 'active' || task.state === 'started' || task.state === 'suspended')) {
+    // Matches TaskBoard.client.tsx's TaskActions: a suspended task can only be resumed, not
+    // unassigned directly -- Refuse is only offered while active or started.
+    if (canAct && (task.state === 'active' || task.state === 'started')) {
         actions.push({label: 'Refuse', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
     }
 

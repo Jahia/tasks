@@ -7,10 +7,10 @@ import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
+import org.jahia.services.content.JCRContentUtils;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
-import org.jahia.services.usermanager.JahiaUserManagerService;
 
 import javax.jcr.RepositoryException;
 
@@ -38,22 +38,17 @@ public class TaskListMutationExtensions {
         // jnt:tasks/jnt:task only ever live in the edit/default workspace -- see
         // TaskBoardQueryExtensions' class comment for why this is pinned explicitly.
         JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
-        if (JahiaUserManagerService.isGuest(session.getUser())) {
-            throw new TaskGraphQLException("You must be logged in to create a task");
-        }
+        TaskAuthorizationService.requireNonGuest(session);
 
         JCRNodeWrapper parent = session.getNode(parentPath);
         JCRNodeWrapper tasksContainer = parent.hasNode("tasks")
                 ? parent.getNode("tasks")
                 : parent.addNode("tasks", "jnt:tasks");
 
-        String name = "task";
-        int suffix = 0;
-        while (tasksContainer.hasNode(name)) {
-            suffix++;
-            name = "task-" + suffix;
-        }
-
+        // JCRContentUtils.findAvailableNodeName also increments an existing trailing "-N" suffix
+        // instead of always appending a new one, and truncates against the configured max node
+        // name length -- both of which a hand-rolled "task", "task-1", "task-2", ... loop misses.
+        String name = JCRContentUtils.findAvailableNodeName(tasksContainer, "task");
         JCRNodeWrapper task = tasksContainer.addNode(name, "jnt:task");
         task.setProperty("jcr:title", title);
         task.setProperty("state", "active");

@@ -7,7 +7,6 @@ import graphql.annotations.annotationTypes.GraphQLNonNull;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNode;
 import org.jahia.modules.graphql.provider.dxm.node.GqlJcrNodeImpl;
-import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
@@ -28,7 +27,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -245,10 +243,7 @@ public class GqlTaskBoard {
             if (JahiaUserManagerService.isGuest(user)) {
                 return false;
             }
-            TaskAuthorizationService authorizationService = Objects.requireNonNull(
-                    BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
-                    "TaskAuthorizationService OSGi service is not available");
-            return authorizationService.isOwnerOrCandidate(node, user);
+            return TaskAuthorizationService.get().isOwnerOrCandidate(node, user);
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve task assignability", e);
         }

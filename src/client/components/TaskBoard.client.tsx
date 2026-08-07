@@ -18,7 +18,7 @@ import {
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
 import type {TaskBoardConnection, TaskBoardNode} from './taskBoard.shared';
-import {UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -44,14 +44,6 @@ type TaskBoardProps = {
     currentUserKey: string;
     canReviewAll: boolean;
 };
-
-function capitalize(value: string | null): string {
-    if (!value) {
-        return 'Unknown';
-    }
-
-    return value.charAt(0).toUpperCase() + value.slice(1);
-}
 
 type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
 
@@ -83,6 +75,11 @@ function outcomeLabel(outcome: string): string {
 // baking a fixed locale into the server's ISO-8601 getCreatedDate()) so it can follow the
 // viewer's own locale later; hardcoded to 'en-US' for now, matching every other hardcoded English
 // label already in this component.
+// Module-scope singletons: a TaskCard is created once per board row, so hoisting these out of
+// formatCreatedDate avoids allocating two new Intl.DateTimeFormat instances on every render.
+const CREATED_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'});
+const CREATED_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true});
+
 function formatCreatedDate(iso: string | null): string | null {
     if (!iso) {
         return null;
@@ -93,9 +90,7 @@ function formatCreatedDate(iso: string | null): string | null {
         return null;
     }
 
-    const datePart = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'}).format(date);
-    const timePart = new Intl.DateTimeFormat('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true}).format(date);
-    return `${datePart}, ${timePart}`;
+    return `${CREATED_DATE_FORMAT.format(date)}, ${CREATED_TIME_FORMAT.format(date)}`;
 }
 
 type MenuAction = {

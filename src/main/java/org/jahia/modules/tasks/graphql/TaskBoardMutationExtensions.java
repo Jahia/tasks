@@ -7,17 +7,14 @@ import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
-import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.usermanager.JahiaUser;
-import org.jahia.services.usermanager.JahiaUserManagerService;
 
 import javax.jcr.RepositoryException;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Root task-board mutations -- the state-transition actions behind the task board's
@@ -39,13 +36,13 @@ public class TaskBoardMutationExtensions {
     public static GqlTaskBoard assignTaskToMe(
             @GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
 
         if (!"active".equals(task.getPropertyAsString("state"))) {
             throw new TaskGraphQLException("Only an active task can be assigned");
         }
-        TaskAuthorizationService authorizationService = authorizationService();
+        TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
         if (!authorizationService.isOwnerOrCandidate(task, user)
                 && !authorizationService.canReviewAllTasks(session.getNode("/"))) {
             throw new TaskGraphQLException("You are not eligible to be assigned this task");
@@ -67,7 +64,7 @@ public class TaskBoardMutationExtensions {
     public static GqlTaskBoard unassignTask(
             @GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
@@ -82,7 +79,7 @@ public class TaskBoardMutationExtensions {
     public static GqlTaskBoard suspendTask(
             @GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
@@ -99,7 +96,7 @@ public class TaskBoardMutationExtensions {
     public static GqlTaskBoard resumeTask(
             @GraphQLName("id") @GraphQLNonNull String id) throws RepositoryException {
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
@@ -117,7 +114,7 @@ public class TaskBoardMutationExtensions {
             @GraphQLName("id") @GraphQLNonNull String id,
             @GraphQLName("outcome") @GraphQLNonNull String outcome) throws RepositoryException {
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
@@ -153,7 +150,7 @@ public class TaskBoardMutationExtensions {
             throw new TaskGraphQLException("\"" + state + "\" is not a valid task state");
         }
         JCRSessionWrapper session = session();
-        JahiaUser user = requireNonGuest(session);
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
@@ -171,14 +168,6 @@ public class TaskBoardMutationExtensions {
         return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
     }
 
-    private static JahiaUser requireNonGuest(JCRSessionWrapper session) {
-        JahiaUser user = session.getUser();
-        if (JahiaUserManagerService.isGuest(user)) {
-            throw new TaskGraphQLException("You must be logged in to act on tasks");
-        }
-        return user;
-    }
-
     private static JCRNodeWrapper loadTask(JCRSessionWrapper session, String id) throws RepositoryException {
         JCRNodeWrapper node = session.getNodeByIdentifier(id);
         if (!node.isNodeType("jnt:task")) {
@@ -188,14 +177,8 @@ public class TaskBoardMutationExtensions {
     }
 
     private static void requireCanAct(JCRNodeWrapper task, JahiaUser user, JCRSessionWrapper session) throws RepositoryException {
-        if (!authorizationService().canActOnTask(task, user, session.getNode("/"))) {
+        if (!TaskAuthorizationService.get().canActOnTask(task, user, session.getNode("/"))) {
             throw new TaskGraphQLException("You are not allowed to act on this task");
         }
-    }
-
-    private static TaskAuthorizationService authorizationService() {
-        return Objects.requireNonNull(
-                BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
-                "TaskAuthorizationService OSGi service is not available");
     }
 }

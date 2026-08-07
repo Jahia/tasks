@@ -1,11 +1,15 @@
 package org.jahia.modules.tasks.graphql;
 
+import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
+import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.usermanager.JahiaUser;
+import org.jahia.services.usermanager.JahiaUserManagerService;
 import org.osgi.service.component.annotations.Component;
 
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
+import java.util.Objects;
 
 /**
  * Single place owning "who may see / act on which task" for the task board,
@@ -14,10 +18,33 @@ import javax.jcr.Value;
  * Published as an OSGi service (not a plain utility) because GraphQL extension
  * classes (e.g. {@link TaskBoardQueryExtensions}) are instantiated per-request by
  * graphql-core, not by Declarative Services, so they cannot use &#64;Reference --
- * they look this service up via {@code BundleUtils.getOsgiService}.
+ * they look this service up via {@link #get()}.
  */
 @Component(service = TaskAuthorizationService.class, immediate = true)
 public class TaskAuthorizationService {
+
+    /**
+     * Looks up the running OSGi service instance -- the one place every GraphQL extension
+     * class in this package resolves it from, instead of each repeating the
+     * {@code BundleUtils.getOsgiService} + null-check boilerplate independently.
+     */
+    public static TaskAuthorizationService get() {
+        return Objects.requireNonNull(
+                BundleUtils.getOsgiService(TaskAuthorizationService.class, null),
+                "TaskAuthorizationService OSGi service is not available");
+    }
+
+    /**
+     * Returns the session's user, or throws if it's the guest/anonymous user -- the shared
+     * "you must be logged in" gate every mutation and non-public query in this module applies.
+     */
+    public static JahiaUser requireNonGuest(JCRSessionWrapper session) {
+        JahiaUser user = session.getUser();
+        if (JahiaUserManagerService.isGuest(user)) {
+            throw new TaskGraphQLException("You must be logged in to act on tasks");
+        }
+        return user;
+    }
 
     /**
      * Whether the current user may see every task (Admin/Reviewer), not just

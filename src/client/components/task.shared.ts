@@ -4,6 +4,16 @@
  * taskBoard.shared.ts for why this has no @jahia/javascript-modules-library import.
  */
 
+// Shared with TaskBoard.client.tsx -- both display a task's state/priority with a capitalized
+// first letter, falling back to "Unknown" for a null/empty value.
+export function capitalize(value: string | null): string {
+    if (!value) {
+        return 'Unknown';
+    }
+
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 export const TASK_QUERY = /* GraphQL */ `
     query Task($id: String!) {
         task(id: $id) {
