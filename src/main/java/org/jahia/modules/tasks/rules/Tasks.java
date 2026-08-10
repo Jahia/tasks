@@ -103,10 +103,8 @@ public class Tasks {
 
     /**
      * @return true if the tile's content was just created, false if the user node already had it
-     *         (also used by {@link ExistingUserDashboardTileMigration} to backfill users that
-     *         predate this rule, so it needs to be visible outside this class).
      */
-    boolean materializeDashboardTile(JCRNodeWrapper userNode) throws RepositoryException {
+    private boolean materializeDashboardTile(JCRNodeWrapper userNode) throws RepositoryException {
         if (userNode.hasNode("pagecontent/my-tasks/currentUserTasks")) {
             return false;
         }
