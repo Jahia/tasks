@@ -1,0 +1,11 @@
+- addMavenRepository: 'https://store.jahia.com/nexus/content/repositories/jahia-public-app-store@id=JahiaStore'
+- addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@snapshots@noreleases@id=JahiaSnapshot'
+
+# The test suite creates its sites on dx-base-demo-templates (see tests/cypress/support/constants.ts) --
+# graphql-dxm-provider is not listed here, it comes from this module's own jahia-depends header.
+- installBundle:
+  - 'mvn:org.jahia.modules/dx-base-demo-core'
+  - 'mvn:org.jahia.modules/dx-base-demo-components'
+  - 'mvn:org.jahia.modules/dx-base-demo-templates'
+  autoStart: true
+  uninstallPreviousVersion: true

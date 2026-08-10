@@ -1,0 +1,56 @@
+version: '3.6'
+services:
+    jahia:
+        image: '${JAHIA_IMAGE}'
+        container_name: jahia
+        deploy:
+          resources:
+            limits:
+              memory: 6gb
+        environment:
+            JAHIA_LICENSE: ${JAHIA_LICENSE}
+            SUPER_USER_PASSWORD: ${SUPER_USER_PASSWORD}
+            PROCESSING_SERVER: 'true'
+            JAHIA_PROPERTIES: ${JAHIA_PROPERTIES}
+            CATALINA_OPTS: ${CATALINA_OPTS:--Xmx3g -Xms2g -XX:+HeapDumpOnOutOfMemoryError}
+            RESTORE_MODULE_STATES: 'false'
+            NEXUS_USERNAME: ${NEXUS_USERNAME}
+            NEXUS_PASSWORD: ${NEXUS_PASSWORD}
+            TZ: ${TIMEZONE}
+            JPDA: '${JPDA:-false}'
+        ports:
+            - '8000:8000'
+            - '8080:8080'
+            - '8101:8101'
+        extra_hosts:
+            - jahia:127.0.0.1
+        networks:
+            - stack
+    # Cypress container
+    cypress:
+        profiles: ["test"]
+        image: '${TESTS_IMAGE}'
+        container_name: cypress
+        deploy:
+          resources:
+            limits:
+              memory: 4gb
+        depends_on:
+            - jahia
+        environment:
+            JAHIA_LICENSE: ${JAHIA_LICENSE}
+            MANIFEST: ${MANIFEST}
+            JAHIA_USERNAME: ${JAHIA_USERNAME}
+            JAHIA_PASSWORD: ${JAHIA_PASSWORD}
+            JAHIA_URL: ${JAHIA_URL}
+            JAHIA_HOST: ${JAHIA_HOST}
+            JAHIA_PORT: ${JAHIA_PORT}
+            NEXUS_USERNAME: ${NEXUS_USERNAME}
+            NEXUS_PASSWORD: ${NEXUS_PASSWORD}
+            SUPER_USER_PASSWORD: ${SUPER_USER_PASSWORD}
+            SKIP_TESTS: ${SKIP_TESTS:-false}
+            TESTS_PROFILE: ${TESTS_PROFILE:-}
+        networks:
+            - stack
+networks:
+    stack:
