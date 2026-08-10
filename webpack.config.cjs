@@ -62,7 +62,7 @@ module.exports = (env, argv) => {
             }),
             new CopyWebpackPlugin({patterns: [{from: './package.json', to: ''}]})
         ],
-        mode: 'development'
+        mode: argv.mode === 'production' ? 'production' : 'development'
     };
 
     config.devtool = (argv.mode === 'production') ? 'source-map' : 'eval-source-map';
