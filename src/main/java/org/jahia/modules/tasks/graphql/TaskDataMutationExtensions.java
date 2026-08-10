@@ -39,6 +39,9 @@ public final class TaskDataMutationExtensions {
         TaskAuthorizationService.requireNonGuest(session);
 
         JCRNodeWrapper node = session.getNodeByIdentifier(id);
+        if (!"taskData".equals(node.getName()) || !node.getParent().isNodeType("jnt:task")) {
+            throw new TaskGraphQLException("Node " + id + " is not a task's taskData node");
+        }
         node.setProperty("jcr:title", title);
         session.save();
         return new GqlJcrNodeImpl(node);
