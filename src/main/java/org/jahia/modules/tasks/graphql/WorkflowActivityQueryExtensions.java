@@ -81,7 +81,10 @@ public final class WorkflowActivityQueryExtensions {
     // one process's currently-available due-dated actions.
     private static void collectActiveTasks(WorkflowService workflowService, HistoryWorkflow process, Locale locale,
             List<GqlWorkflowActivityTask> activeTasks) {
-        Workflow active = workflowService.getWorkflow(process.getProcessId(), process.getProvider(), locale);
+        Workflow active = workflowService.getWorkflow(process.getProvider(), process.getProcessId(), locale);
+        if (active == null) {
+            return;
+        }
         for (WorkflowAction action : active.getAvailableActions()) {
             if (action instanceof WorkflowTask) {
                 WorkflowTask task = (WorkflowTask) action;
