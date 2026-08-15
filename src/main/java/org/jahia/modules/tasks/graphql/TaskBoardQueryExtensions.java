@@ -19,6 +19,8 @@ import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.query.QueryWrapper;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.usermanager.JahiaUserManagerService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
@@ -53,9 +55,26 @@ import java.util.stream.StreamSupport;
  * eq 'live'} branches worked around, by redirecting to a preview/edit-workspace fetch instead of
  * querying directly). A board rendered from a "live" session context would otherwise silently
  * return zero tasks even though they exist.
+ *
+ * <h2>Two pagination paths (#64)</h2>
+ * The board serves a page one of two ways, and which one it takes is purely a performance
+ * decision -- the two are required to produce identical rows, order, cursors, hasNextPage and
+ * totalCount for the same data:
+ * <ul>
+ *   <li><b>Query-level slicing</b> (the fast path) when the ordering is a raw JCR property and
+ *       there is no {@code search}: the page is cut by the JCR query itself
+ *       (setOffset/setLimit), and the total is a second count-only query. Cost is proportional
+ *       to the page size, not to the size of the board.</li>
+ *   <li><b>Scanning</b> (the original path) when the request needs values that only exist after
+ *       the query -- a {@code search} term, or one of the board's own resolved-value sort columns.
+ *       Those are filtered/sorted in memory, so the page cannot be delegated to JCR and the whole
+ *       result set is walked. Still O(N), by design; see {@link #RESOLVED_VALUE_SORT_FIELDS}.</li>
+ * </ul>
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Query.class)
 public final class TaskBoardQueryExtensions {
+
+    private static final Logger logger = LoggerFactory.getLogger(TaskBoardQueryExtensions.class);
 
     private TaskBoardQueryExtensions() {
     }
@@ -64,6 +83,13 @@ public final class TaskBoardQueryExtensions {
     // query level) for whichever of these isn't superseded by RESOLVED_VALUE_SORT_FIELDS below.
     private static final List<String> ALLOWED_SORT_PROPERTIES = Arrays.asList(
             "jcr:created", "jcr:lastModified", "dueDate");
+
+    // The board's documented default ordering: newest first (jahia-private#5292). Both halves are
+    // stated explicitly here rather than falling out of "no sortBy happens to land on jcr:created"
+    // plus "no sortOrder happens to mean descending", so that the default a caller gets when they
+    // pass neither argument is a decision this class makes, not an accident of two fallbacks.
+    private static final String DEFAULT_SORT_PROPERTY = "jcr:created";
+    private static final boolean DEFAULT_ASCENDING = false;
 
     // The board's own clickable columns (Task Name/Creator/Owner/State) sort by their RESOLVED
     // display value instead, the same way the search filter above matches resolved values rather
@@ -86,10 +112,12 @@ public final class TaskBoardQueryExtensions {
             @GraphQLDescription("Either a board column -- title, creator, owner or state, sorted in-memory by the "
                     + "same resolved value the UI displays -- or one of the raw date properties jcr:created "
                     + "(creation date), jcr:lastModified (last update) or dueDate, sorted by JCR itself. "
-                    + "Anything else falls back to jcr:created, which is also the default.")
+                    + "Anything else, including omitting it, falls back to the board default: jcr:created, "
+                    + "newest first.")
             String sortBy,
             @GraphQLName("sortOrder")
-            @GraphQLDescription("ascending/asc or descending/desc (defaults to desc)")
+            @GraphQLDescription("ascending/asc or descending/desc; omitting it means descending, so the default "
+                    + "board (no sortBy, no sortOrder) is newest-created first")
             String sortOrder,
             @GraphQLName("filterState")
             @GraphQLDescription("Restrict results to these task states (active, started, finished, suspended)")
@@ -102,11 +130,18 @@ public final class TaskBoardQueryExtensions {
 
         JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
         JahiaUser user = session.getUser();
-        PaginationHelper.Arguments paginationArguments = PaginationHelper.parseArguments(environment);
+        PageArguments pageArguments = PageArguments.parse(environment);
+
+        // Built here and not where it is used, because constructing it is also how the pagination
+        // arguments get validated: core rejects a negative first/last/offset/limit, and rejects
+        // mixing offset/limit with the cursor arguments, from this constructor. Building it up
+        // front keeps those errors identical whichever path ends up serving the request -- the
+        // fast path below never reaches core's pagination at all.
+        PaginationHelper.Arguments coreArguments = pageArguments.toCoreArguments();
 
         // Public / guest: no visibility at all.
         if (JahiaUserManagerService.isGuest(user)) {
-            return PaginationHelper.paginate(Stream.empty(), n -> "", paginationArguments);
+            return PaginationHelper.paginate(Stream.empty(), n -> "", coreArguments);
         }
 
         TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
@@ -114,47 +149,175 @@ public final class TaskBoardQueryExtensions {
 
         // Expanded once here and handed to every row below (see GqlTaskBoard's constructor):
         // resolving it is a membership-cache lookup plus a walk over every site, which has no
-        // business running again per row for viewerRole/isAssignableToMe.
+        // business running again per row for viewerRole/isAssignableToMe. It travels inside the
+        // per-request context, together with the display-name and workflow memos every row of
+        // this one page shares (#64).
         Set<String> candidateIdentifiers = authorizationService.getCandidateIdentifiers(user);
+        TaskBoardRequestContext context = new TaskBoardRequestContext(candidateIdentifiers);
 
-        List<String> bindNames = new ArrayList<>();
-        List<Value> bindValues = new ArrayList<>();
-        StringBuilder statement = new StringBuilder("select * from [jnt:task] as task where ");
+        QueryPlan plan = buildQueryPlan(session, user, canReviewAll, candidateIdentifiers, filterState,
+                sortBy, sortOrder);
 
-        if (canReviewAll) {
-            // Always-true condition -- every task node has jcr:createdBy -- so an
-            // Admin/Reviewer's WHERE clause stays valid JCR-SQL2 with no owner scoping.
-            statement.append("task.[jcr:createdBy] is not null");
+        // The two values below are what decides between the two pagination paths: both force rows
+        // to be filtered/sorted after the query, on values JCR-SQL2 never saw, so neither can be
+        // delegated to setOffset/setLimit.
+        boolean hasSearch = search != null && !search.trim().isEmpty();
+        boolean sortsOnResolvedValue = RESOLVED_VALUE_SORT_FIELDS.contains(sortBy);
+
+        if (!hasSearch && !sortsOnResolvedValue) {
+            DXPaginatedData<GqlTaskBoard> page = slicedPage(session, plan, pageArguments, context);
+            if (page != null) {
+                return page;
+            }
+            // Fell through: this particular combination of pagination arguments can't be
+            // expressed as an offset (see slicedPage). Serve it by scanning instead -- slower,
+            // but the two paths agree on what they return.
+        }
+        return scannedPage(session, plan, coreArguments, context, search, sortBy);
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Fast path: let JCR cut the page
+    // ------------------------------------------------------------------------------------------
+
+    /**
+     * The page, sliced by the JCR query itself, or null when these pagination arguments can't be
+     * turned into an offset -- in which case the caller falls back to {@link #scannedPage}.
+     *
+     * <p>Returning null rather than throwing is the whole safety story here: every case this
+     * method isn't sure about (backwards paging, an unbounded page, a cursor it can't place, a
+     * cursor whose row has moved) is handed back to the path that was always able to serve it.
+     */
+    private static DXPaginatedData<GqlTaskBoard> slicedPage(JCRSessionWrapper session, QueryPlan plan,
+            PageArguments arguments, TaskBoardRequestContext context) throws RepositoryException {
+
+        // Backwards paging (last/before) is defined relative to the END of the result set, which
+        // an offset can't express without knowing the total first. Left to the scanning path.
+        if (arguments.last != null || arguments.before != null) {
+            return null;
+        }
+        Integer pageSize = arguments.pageSize();
+        if (pageSize == null) {
+            // No first/limit: the caller asked for the entire board, so there is no page to cut.
+            return null;
+        }
+        // Past core's node limit it stops the query and reports a truncated result; that guard
+        // only exists on the scanning path, so hand oversized pages back to it rather than
+        // quietly serving something core would have refused.
+        if (pageSize > PaginationHelper.getNodeLimit() - 2) {
+            return null;
+        }
+
+        String cursorIdentifier = null;
+        int firstRow;
+        int startOffset;
+        if (arguments.after != null) {
+            int cursorIndex = TaskBoardPage.indexOf(arguments.after);
+            if (cursorIndex < 0) {
+                // A bare-identifier cursor (issued by the scanning path, or by a build from
+                // before cursors carried an index): its position is unknown without a scan.
+                return null;
+            }
+            cursorIdentifier = TaskBoardPage.identifierOf(arguments.after);
+            // Start one row EARLIER than the page, on the cursor's own row, so that the offset
+            // can be verified against the identifier the cursor carries before it is trusted.
+            firstRow = cursorIndex;
+            startOffset = cursorIndex + 1;
         } else {
-            statement.append("(task.assigneeUserKey = $userKey or task.[jcr:createdBy] = $userName");
-            bindNames.add("userKey");
-            bindValues.add(session.getValueFactory().createValue(user.getUserKey()));
-            bindNames.add("userName");
-            bindValues.add(session.getValueFactory().createValue(user.getName()));
-            appendCandidateFilter(statement, candidateIdentifiers, bindNames, bindValues, session);
-            statement.append(")");
+            // offset/limit and the cursor arguments are mutually exclusive -- core rejects the
+            // combination outright when the Arguments were built -- so reaching here means there
+            // is no cursor and offset is the only thing that can move the window.
+            firstRow = arguments.offset != null ? arguments.offset : 0;
+            startOffset = firstRow;
         }
 
-        appendStateFilter(statement, filterState, bindNames, bindValues, session);
+        // One extra row to answer hasNextPage without a second query, plus -- when resuming from
+        // a cursor -- the cursor's own row, which is dropped again below.
+        int fetchCount = pageSize + 1 + (cursorIdentifier != null ? 1 : 0);
+        List<GqlTaskBoard> rows = executePage(session, plan, firstRow, fetchCount, context);
 
-        boolean ascending = "asc".equalsIgnoreCase(sortOrder) || "ascending".equalsIgnoreCase(sortOrder);
-
-        // Sort target is an identifier, not a value -- bind variables can't parameterize it, so
-        // it's constrained to a fixed allow-list instead (jahia-injection-defense). When sortBy
-        // is one of the board's own columns (RESOLVED_VALUE_SORT_FIELDS), this default JCR-level
-        // order is just the stable pre-sort the in-memory sort below re-sorts on top of -- it
-        // still needs to be *some* deterministic order for that stable sort to be meaningful.
-        String orderProperty = ALLOWED_SORT_PROPERTIES.contains(sortBy) ? sortBy : "jcr:created";
-        statement.append(" order by task.[").append(orderProperty).append("] ").append(ascending ? "asc" : "desc");
-
-        QueryWrapper query = session.getWorkspace().getQueryManager().createQuery(statement.toString(), Query.JCR_SQL2);
-        for (int i = 0; i < bindNames.size(); i++) {
-            query.bindValue(bindNames.get(i), bindValues.get(i));
+        if (cursorIdentifier != null) {
+            if (rows.isEmpty() || !cursorIdentifier.equals(rows.get(0).getId())) {
+                // Rows were inserted or removed since this cursor was issued, so its index no
+                // longer points at its own row. Rather than silently serving a shifted (or empty)
+                // page, fall back to the scanning path, which finds the row by identifier.
+                logger.debug("taskBoard cursor index {} no longer holds node {}, falling back to a full scan",
+                        firstRow, cursorIdentifier);
+                return null;
+            }
+            rows.remove(0);
         }
 
+        boolean hasNextPage = rows.size() > pageSize;
+        int totalCount;
+        if (hasNextPage) {
+            rows = new ArrayList<>(rows.subList(0, pageSize));
+            totalCount = countAll(session, plan);
+            if (totalCount < 0) {
+                // getSize() is allowed to say "I don't know"; counting by hand is exactly what the
+                // scanning path does anyway.
+                return null;
+            }
+        } else {
+            // The probe row came back empty, so there is nothing past this page and the total is
+            // already known: everything skipped, plus everything on the page. Worth the branch --
+            // it keeps a board that fits on one page (the common case for a contributor, whose
+            // visibility clause usually matches a handful of rows) down to a single query, which
+            // is what it cost before any of this existed.
+            totalCount = startOffset + rows.size();
+        }
+        return new TaskBoardPage(rows, startOffset, totalCount, startOffset > 0, hasNextPage);
+    }
+
+    private static List<GqlTaskBoard> executePage(JCRSessionWrapper session, QueryPlan plan, int offset,
+            int limit, TaskBoardRequestContext context) throws RepositoryException {
+        long startedAt = System.nanoTime();
+        QueryWrapper query = plan.createOrderedQuery(session);
+        query.setOffset(offset);
+        query.setLimit(limit);
         JCRNodeIteratorWrapper nodes = query.execute().getNodes();
+        List<GqlTaskBoard> rows = new ArrayList<>();
+        while (nodes.hasNext()) {
+            rows.add(new GqlTaskBoard((JCRNodeWrapper) nodes.next(), context));
+        }
+        if (logger.isDebugEnabled()) {
+            logger.debug("taskBoard sliced page: offset={} limit={} materialized={} rows in {} ms",
+                    offset, limit, rows.size(), elapsedMs(startedAt));
+        }
+        return rows;
+    }
+
+    /**
+     * The total number of rows the board's WHERE clause matches, as reported by the result
+     * iterator rather than by walking it. Jahia applies read-permission filtering inside the
+     * index rather than while iterating, so this count is the exact number of rows this caller
+     * would have been able to see -- not an upper bound. The ordering is deliberately left off
+     * the statement: a count doesn't depend on it, and sorting is a real cost on a large result.
+     */
+    private static int countAll(JCRSessionWrapper session, QueryPlan plan) throws RepositoryException {
+        long startedAt = System.nanoTime();
+        long size = plan.createCountQuery(session).execute().getNodes().getSize();
+        if (logger.isDebugEnabled()) {
+            logger.debug("taskBoard count query: totalCount={} in {} ms", size, elapsedMs(startedAt));
+        }
+        if (size < 0) {
+            return -1;
+        }
+        return size > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) size;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Scanning path: filter/sort in memory, then let core paginate the stream
+    // ------------------------------------------------------------------------------------------
+
+    private static DXPaginatedData<GqlTaskBoard> scannedPage(JCRSessionWrapper session, QueryPlan plan,
+            PaginationHelper.Arguments arguments, TaskBoardRequestContext context, String search, String sortBy)
+            throws RepositoryException {
+
+        long startedAt = System.nanoTime();
+        JCRNodeIteratorWrapper nodes = plan.createOrderedQuery(session).execute().getNodes();
         Stream<GqlTaskBoard> stream = StreamSupport.stream(nodes.spliterator(), false)
-                .map(node -> new GqlTaskBoard(node, candidateIdentifiers));
+                .map(node -> new GqlTaskBoard(node, context));
 
         // Not part of the JCR-SQL2 statement above: title/assignee are resolved values (the
         // stored jcr:title can be a "##resourceBundle(...)##" macro, and assigneeUserKey is a
@@ -170,55 +333,35 @@ public final class TaskBoardQueryExtensions {
             // element's sort key once up front (a Schwartzian transform) makes the extractor run
             // exactly once per row instead.
             Function<GqlTaskBoard, String> valueOf = resolvedValueExtractor(sortBy);
-            Comparator<String> keyComparator = resolvedValueComparator(ascending);
+            Comparator<String> keyComparator = resolvedValueComparator(plan.ascending);
             stream = stream.map(task -> new AbstractMap.SimpleEntry<>(valueOf.apply(task), task))
                     .sorted(Comparator.comparing(Map.Entry::getKey, keyComparator))
                     .map(Map.Entry::getValue);
         }
 
-        return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
-    }
+        if (logger.isDebugEnabled()) {
+            // Logged before the stream is consumed: this path is lazy, so what is measured here
+            // is only the JCR query itself -- the per-row cost lands on core's paginate() below.
+            logger.debug("taskBoard full scan (search={}, resolved-value sort={}): query executed in {} ms",
+                    search != null && !search.trim().isEmpty(), RESOLVED_VALUE_SORT_FIELDS.contains(sortBy),
+                    elapsedMs(startedAt));
+        }
 
-    // Split out of taskBoard() above -- appends "or task.candidates = $candidate0 or ..." to the
-    // non-reviewer visibility clause, one bind variable per identifier the viewer can be listed
-    // under (their own user key/path plus every group they belong to, see
-    // TaskAuthorizationService#getCandidateIdentifiers).
-    //
-    // "task.candidates = $x" is a match-any-value comparison on the multivalued candidates
-    // property in JCR-SQL2, so one equality per identifier is all that's needed -- exactly the
-    // or-chain the legacy JSPs built by hand, except every value is bound rather than
-    // string-concatenated into the statement (jahia-injection-defense).
-    private static void appendCandidateFilter(StringBuilder statement, Set<String> candidateIdentifiers,
-            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
-        int index = 0;
-        for (String identifier : candidateIdentifiers) {
-            String bindName = "candidate" + index++;
-            statement.append(" or task.candidates = $").append(bindName);
-            bindNames.add(bindName);
-            bindValues.add(session.getValueFactory().createValue(identifier));
+        // Core is given, and matches on, bare identifier cursors -- the format this query has
+        // always emitted -- so it keeps locating a row by identity rather than by position. The
+        // wrapper only re-publishes each cursor with the row's index attached, so that a client
+        // coming off this path can go back to the sliced one on its next page.
+        DXPaginatedData<GqlTaskBoard> page = TaskBoardPage.withIndexedCursors(PaginationHelper.paginate(
+                stream, task -> TaskBoardPage.encodeCursor(task.getId()), arguments));
+        if (logger.isDebugEnabled()) {
+            // getTotalCount() is what drains the rest of the stream, so this line reports the real
+            // cost of the scan -- and, on debug only, forces that drain even for a caller that
+            // never asked for totalCount. That is the measurement being switched on, not a side
+            // effect of it: at info level nothing here runs.
+            logger.debug("taskBoard full scan: {} rows on the page, {} rows matched, {} ms total",
+                    page.getNodesCount(), page.getTotalCount(), elapsedMs(startedAt));
         }
-    }
-
-    // Split out of taskBoard() above to keep its own cognitive complexity down -- appends the
-    // "and (task.state = $state0 or task.state = $state1 or ...)" clause plus its bind values,
-    // one bind variable per requested state (identical bind-by-value approach as the userKey/
-    // userName scoping above, so a state value can never be interpreted as SQL).
-    private static void appendStateFilter(StringBuilder statement, List<String> filterState,
-            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
-        if (filterState == null || filterState.isEmpty()) {
-            return;
-        }
-        statement.append(" and (");
-        for (int i = 0; i < filterState.size(); i++) {
-            if (i > 0) {
-                statement.append(" or ");
-            }
-            String bindName = STATE_FIELD + i;
-            statement.append("task.state = $").append(bindName);
-            bindNames.add(bindName);
-            bindValues.add(session.getValueFactory().createValue(filterState.get(i)));
-        }
-        statement.append(")");
+        return page;
     }
 
     // Split out of taskBoard() above -- the search box's case-insensitive substring match against
@@ -260,6 +403,218 @@ public final class TaskBoardQueryExtensions {
         Comparator<String> direction = ascending ? String.CASE_INSENSITIVE_ORDER : String.CASE_INSENSITIVE_ORDER.reversed();
         return Comparator.nullsLast(direction);
     }
+
+    private static long elapsedMs(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Statement building
+    // ------------------------------------------------------------------------------------------
+
+    /**
+     * The board's JCR-SQL2 statement, split in two so the same WHERE clause and the same bind
+     * values can be reused for the page query and for the count query without rebuilding either.
+     */
+    private static final class QueryPlan {
+        private final String selection;
+        private final String orderBy;
+        private final List<String> bindNames;
+        private final List<Value> bindValues;
+        private final boolean ascending;
+
+        private QueryPlan(String selection, String orderBy, List<String> bindNames, List<Value> bindValues,
+                boolean ascending) {
+            this.selection = selection;
+            this.orderBy = orderBy;
+            this.bindNames = bindNames;
+            this.bindValues = bindValues;
+            this.ascending = ascending;
+        }
+
+        QueryWrapper createOrderedQuery(JCRSessionWrapper session) throws RepositoryException {
+            return create(session, selection + orderBy);
+        }
+
+        QueryWrapper createCountQuery(JCRSessionWrapper session) throws RepositoryException {
+            return create(session, selection);
+        }
+
+        private QueryWrapper create(JCRSessionWrapper session, String statement) throws RepositoryException {
+            QueryWrapper query = session.getWorkspace().getQueryManager().createQuery(statement, Query.JCR_SQL2);
+            for (int i = 0; i < bindNames.size(); i++) {
+                query.bindValue(bindNames.get(i), bindValues.get(i));
+            }
+            return query;
+        }
+    }
+
+    private static QueryPlan buildQueryPlan(JCRSessionWrapper session, JahiaUser user, boolean canReviewAll,
+            Set<String> candidateIdentifiers, List<String> filterState, String sortBy, String sortOrder)
+            throws RepositoryException {
+
+        List<String> bindNames = new ArrayList<>();
+        List<Value> bindValues = new ArrayList<>();
+        StringBuilder statement = new StringBuilder("select * from [jnt:task] as task where ");
+
+        if (canReviewAll) {
+            // Always-true condition -- every task node has jcr:createdBy -- so an
+            // Admin/Reviewer's WHERE clause stays valid JCR-SQL2 with no owner scoping.
+            statement.append("task.[jcr:createdBy] is not null");
+        } else {
+            statement.append("(task.assigneeUserKey = $userKey or task.[jcr:createdBy] = $userName");
+            bindNames.add("userKey");
+            bindValues.add(session.getValueFactory().createValue(user.getUserKey()));
+            bindNames.add("userName");
+            bindValues.add(session.getValueFactory().createValue(user.getName()));
+            appendCandidateFilter(statement, candidateIdentifiers, bindNames, bindValues, session);
+            statement.append(")");
+        }
+
+        appendStateFilter(statement, filterState, bindNames, bindValues, session);
+
+        boolean ascending = resolveAscending(sortOrder);
+
+        // Sort target is an identifier, not a value -- bind variables can't parameterize it, so
+        // it's constrained to a fixed allow-list instead (jahia-injection-defense). When sortBy
+        // is one of the board's own columns (RESOLVED_VALUE_SORT_FIELDS), this default JCR-level
+        // order is just the stable pre-sort the in-memory sort re-sorts on top of -- it still
+        // needs to be *some* deterministic order for that stable sort to be meaningful.
+        String orderProperty = ALLOWED_SORT_PROPERTIES.contains(sortBy) ? sortBy : DEFAULT_SORT_PROPERTY;
+        String orderBy = " order by task.[" + orderProperty + "] " + (ascending ? "asc" : "desc");
+
+        return new QueryPlan(statement.toString(), orderBy, bindNames, bindValues, ascending);
+    }
+
+    // Omitting sortOrder means descending, which is what makes the board's documented default
+    // (no sortBy either) newest-created first; anything that isn't recognisably "ascending" is
+    // descending too, so an unknown value degrades to the default rather than to an error.
+    private static boolean resolveAscending(String sortOrder) {
+        if (sortOrder == null) {
+            return DEFAULT_ASCENDING;
+        }
+        return "asc".equalsIgnoreCase(sortOrder) || "ascending".equalsIgnoreCase(sortOrder);
+    }
+
+    // Split out of buildQueryPlan() above -- appends "or task.candidates = $candidate0 or ..." to
+    // the non-reviewer visibility clause, one bind variable per identifier the viewer can be
+    // listed under (their own user key/path plus every group they belong to, see
+    // TaskAuthorizationService#getCandidateIdentifiers).
+    //
+    // "task.candidates = $x" is a match-any-value comparison on the multivalued candidates
+    // property in JCR-SQL2, so one equality per identifier is all that's needed -- exactly the
+    // or-chain the legacy JSPs built by hand, except every value is bound rather than
+    // string-concatenated into the statement (jahia-injection-defense).
+    private static void appendCandidateFilter(StringBuilder statement, Set<String> candidateIdentifiers,
+            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        int index = 0;
+        for (String identifier : candidateIdentifiers) {
+            String bindName = "candidate" + index++;
+            statement.append(" or task.candidates = $").append(bindName);
+            bindNames.add(bindName);
+            bindValues.add(session.getValueFactory().createValue(identifier));
+        }
+    }
+
+    // Split out of buildQueryPlan() above to keep its own cognitive complexity down -- appends the
+    // "and (task.state = $state0 or task.state = $state1 or ...)" clause plus its bind values,
+    // one bind variable per requested state (identical bind-by-value approach as the userKey/
+    // userName scoping above, so a state value can never be interpreted as SQL).
+    private static void appendStateFilter(StringBuilder statement, List<String> filterState,
+            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        if (filterState == null || filterState.isEmpty()) {
+            return;
+        }
+        statement.append(" and (");
+        for (int i = 0; i < filterState.size(); i++) {
+            if (i > 0) {
+                statement.append(" or ");
+            }
+            String bindName = STATE_FIELD + i;
+            statement.append("task.state = $").append(bindName);
+            bindNames.add(bindName);
+            bindValues.add(session.getValueFactory().createValue(filterState.get(i)));
+        }
+        statement.append(")");
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Pagination arguments
+    // ------------------------------------------------------------------------------------------
+
+    /**
+     * The connection's pagination arguments, read straight off the {@link DataFetchingEnvironment}
+     * the same way {@link PaginationHelper#parseArguments} does.
+     *
+     * <p>They are re-read here rather than taken from core's own {@code PaginationHelper.Arguments}
+     * because that type exposes no accessors -- it can be built and handed back to core, but not
+     * inspected, and the fast path has to inspect them to decide whether it can serve the request.
+     */
+    private static final class PageArguments {
+        private final String before;
+        private final String after;
+        private final Integer first;
+        private final Integer last;
+        private final Integer offset;
+        private final Integer limit;
+
+        private PageArguments(String before, String after, Integer first, Integer last, Integer offset,
+                Integer limit) {
+            this.before = before;
+            this.after = after;
+            this.first = first;
+            this.last = last;
+            this.offset = offset;
+            this.limit = limit;
+        }
+
+        static PageArguments parse(DataFetchingEnvironment environment) {
+            return new PageArguments(
+                    environment.getArgument("before"),
+                    environment.getArgument("after"),
+                    environment.getArgument("first"),
+                    environment.getArgument("last"),
+                    environment.getArgument("offset"),
+                    environment.getArgument("limit"));
+        }
+
+        /**
+         * How many rows the page holds. Null means "no page size at all", i.e. the caller wants
+         * every matching row -- which the fast path has nothing to slice and hands to the
+         * scanning path instead.
+         *
+         * <p>{@code first} and {@code limit} belong to the two mutually exclusive argument styles
+         * and core refuses requests that mix them, so in practice only one is ever set; the
+         * smaller-wins tie-break just matches what core's own collect loop would do (it stops on
+         * whichever of the two caps is reached first) rather than picking arbitrarily.
+         */
+        Integer pageSize() {
+            if (limit != null && first != null) {
+                return Math.min(limit, first);
+            }
+            return limit != null ? limit : first;
+        }
+
+        /**
+         * The same arguments in the shape core's pagination wants, with any index-bearing cursor
+         * normalized back to the bare identifier the scanning path matches on -- so a client that
+         * starts searching, or switches to a resolved-value sort, in the middle of paginating
+         * still resumes from the row its cursor names instead of losing its place. A cursor that
+         * doesn't decode at all is passed through untouched: it matched nothing before this
+         * normalization existed and it still matches nothing, which is the same empty page.
+         */
+        PaginationHelper.Arguments toCoreArguments() {
+            return new PaginationHelper.Arguments(toIdentifierCursor(before), toIdentifierCursor(after),
+                    first, last, offset, limit);
+        }
+
+        private static String toIdentifierCursor(String cursor) {
+            String identifier = TaskBoardPage.identifierOf(cursor);
+            return identifier == null ? cursor : TaskBoardPage.encodeCursor(identifier);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------
 
     @GraphQLField
     @GraphQLDescription("A single task by id, for the task detail view (jnt:task's own page). Visibility is "

@@ -52,28 +52,25 @@ public class GqlTaskBoard {
 
     private final JCRNodeWrapper node;
 
-    // The viewer's expanded candidate identifiers (user key/path + group memberships). Supplied by
-    // TaskBoardQueryExtensions#taskBoard, which resolves it once for the whole page of rows;
-    // null when this row was built outside that path (single-task query, mutation result), in
-    // which case it is resolved lazily, once, on first use. volatile because graphql-java may
-    // resolve two fields of the same row (viewerRole and isAssignableToMe) on different threads:
-    // recomputing the same set twice is harmless, publishing a half-built one is not.
-    private volatile Set<String> candidateIdentifiers;
+    // Everything this row shares with the other rows of the same request: the viewer's expanded
+    // candidate identifiers (user key/path + group memberships), the userKey -> display name memo
+    // and the workflow-process memo. Supplied by TaskBoardQueryExtensions#taskBoard, which builds
+    // one per request; a row built outside that path (single-task query, mutation result) gets a
+    // context of its own, so the caches still apply within that one row and no branch here has to
+    // care whether it has a context at all.
+    private final TaskBoardRequestContext context;
 
     public GqlTaskBoard(JCRNodeWrapper node) {
-        this(node, null);
+        this(node, new TaskBoardRequestContext(null));
     }
 
-    public GqlTaskBoard(JCRNodeWrapper node, Set<String> candidateIdentifiers) {
+    GqlTaskBoard(JCRNodeWrapper node, TaskBoardRequestContext context) {
         this.node = node;
-        this.candidateIdentifiers = candidateIdentifiers;
+        this.context = context;
     }
 
     private Set<String> candidateIdentifiers(JahiaUser user) {
-        if (candidateIdentifiers == null) {
-            candidateIdentifiers = TaskAuthorizationService.get().getCandidateIdentifiers(user);
-        }
-        return candidateIdentifiers;
+        return context.getCandidateIdentifiers(user);
     }
 
     @GraphQLField
@@ -190,7 +187,16 @@ public class GqlTaskBoard {
     // start-user resolution -- all are "a stored JCR principal path that should resolve to a
     // readable display name". Works for group paths as well as user paths: both resolve to a node
     // whose name is what the UI shows.
-    private static String resolveUserDisplayName(String userKey) throws RepositoryException {
+    //
+    // Memoized per request (#64): the same assignee, the same candidate group and the same
+    // workflow start user recur across the rows of a page, and each miss is a JCR node lookup.
+    // The memo lives on the request context, never in a static field -- what a userKey resolves
+    // to (or whether it resolves at all) is a function of the caller's own session.
+    private String resolveUserDisplayName(String userKey) throws RepositoryException {
+        return context.displayName(userKey, GqlTaskBoard::lookUpUserDisplayName);
+    }
+
+    private static String lookUpUserDisplayName(String userKey) throws RepositoryException {
         try {
             return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
                     .getNode(userKey).getName();
@@ -234,11 +240,11 @@ public class GqlTaskBoard {
                 return null;
             }
 
-            // (provider, id, locale) -- WorkflowService#getWorkflow is the one method in this API
-            // where provider comes FIRST; getWorkflowTask/getHistoryWorkflow both take (id,
-            // provider, locale) instead. Getting this backwards throws (provider looked up by an
-            // arbitrary process id never matches a registered WorkflowProvider key).
-            Workflow workflow = workflowService.getWorkflow(provider, task.getProcessId(), locale);
+            // Memoized per request (#64): every task of the same workflow process -- all the
+            // review tasks of one publication, say -- resolves the identical Workflow, and
+            // getWorkflow is a round trip to the workflow engine. The context also documents the
+            // argument-order trap in the WorkflowService call it wraps.
+            Workflow workflow = context.workflow(provider, task.getProcessId(), locale, workflowService);
             if (workflow == null || workflow.getStartUser() == null || workflow.getStartTime() == null) {
                 // WorkflowService returns null once a process instance is no longer live in the
                 // jBPM session -- shouldn't normally happen for a task whose process is still
