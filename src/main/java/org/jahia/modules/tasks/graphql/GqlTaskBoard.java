@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -43,10 +44,36 @@ public class GqlTaskBoard {
     // which embed the macro followed by literal text (see getTitle()'s javadoc below).
     private static final Pattern RESOURCE_BUNDLE_MACRO = Pattern.compile("##resourceBundle\\([^\"#]*\\)##");
 
+    // viewerRole values -- a small closed vocabulary rather than a real GraphQL enum, so adding a
+    // role later doesn't break clients that switch on the string.
+    private static final String ROLE_ASSIGNEE = "assignee";
+    private static final String ROLE_CANDIDATE = "candidate";
+    private static final String ROLE_NONE = "none";
+
     private final JCRNodeWrapper node;
 
+    // The viewer's expanded candidate identifiers (user key/path + group memberships). Supplied by
+    // TaskBoardQueryExtensions#taskBoard, which resolves it once for the whole page of rows;
+    // null when this row was built outside that path (single-task query, mutation result), in
+    // which case it is resolved lazily, once, on first use. volatile because graphql-java may
+    // resolve two fields of the same row (viewerRole and isAssignableToMe) on different threads:
+    // recomputing the same set twice is harmless, publishing a half-built one is not.
+    private volatile Set<String> candidateIdentifiers;
+
     public GqlTaskBoard(JCRNodeWrapper node) {
+        this(node, null);
+    }
+
+    public GqlTaskBoard(JCRNodeWrapper node, Set<String> candidateIdentifiers) {
         this.node = node;
+        this.candidateIdentifiers = candidateIdentifiers;
+    }
+
+    private Set<String> candidateIdentifiers(JahiaUser user) {
+        if (candidateIdentifiers == null) {
+            candidateIdentifiers = TaskAuthorizationService.get().getCandidateIdentifiers(user);
+        }
+        return candidateIdentifiers;
     }
 
     @GraphQLField
@@ -159,8 +186,10 @@ public class GqlTaskBoard {
         }
     }
 
-    // Shared by getAssigneeDisplayName() and getWorkflowSummary()'s start-user resolution --
-    // both are "a JCR user-key property that should resolve to a readable display name".
+    // Shared by getAssigneeDisplayName(), getCandidateDisplayNames() and getWorkflowSummary()'s
+    // start-user resolution -- all are "a stored JCR principal path that should resolve to a
+    // readable display name". Works for group paths as well as user paths: both resolve to a node
+    // whose name is what the UI shows.
     private static String resolveUserDisplayName(String userKey) throws RepositoryException {
         try {
             return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
@@ -245,9 +274,54 @@ public class GqlTaskBoard {
             if (JahiaUserManagerService.isGuest(user)) {
                 return false;
             }
-            return TaskAuthorizationService.get().isOwnerOrCandidate(node, user);
+            return TaskAuthorizationService.get().isOwnerOrCandidate(node, user, candidateIdentifiers(user));
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve task assignability", e);
+        }
+    }
+
+    @GraphQLField
+    @GraphQLNonNull
+    @GraphQLDescription("The current viewer's relationship to this task: \"assignee\" when they already own it, "
+            + "\"candidate\" when they are listed in its candidates (directly, or through one of their groups), "
+            + "\"none\" otherwise. Independent of canReviewAll -- a reviewer sees \"none\" on a task they are "
+            + "neither assigned nor a candidate for, even though they may still act on it.")
+    public String getViewerRole() {
+        try {
+            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
+            JahiaUser user = session.getUser();
+            if (JahiaUserManagerService.isGuest(user)) {
+                return ROLE_NONE;
+            }
+            TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
+            if (authorizationService.isAssignee(node, user)) {
+                return ROLE_ASSIGNEE;
+            }
+            if (authorizationService.isCandidate(node, candidateIdentifiers(user))) {
+                return ROLE_CANDIDATE;
+            }
+            return ROLE_NONE;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve the viewer's role on this task", e);
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Display names of the principals eligible to take this task, resolved from its raw "
+            + "candidates values (JCR paths of users and groups alike); a value that doesn't resolve to a node "
+            + "the viewer can read is returned as-is. Empty when the task declares no candidates.")
+    public List<String> getCandidateDisplayNames() {
+        try {
+            if (!node.hasProperty("candidates")) {
+                return Collections.emptyList();
+            }
+            List<String> displayNames = new ArrayList<>();
+            for (Value candidate : node.getProperty("candidates").getValues()) {
+                displayNames.add(resolveUserDisplayName(candidate.getString()));
+            }
+            return displayNames;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve task candidate display names", e);
         }
     }
 

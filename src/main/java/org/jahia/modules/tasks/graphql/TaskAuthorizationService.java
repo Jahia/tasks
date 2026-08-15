@@ -3,13 +3,18 @@ package org.jahia.modules.tasks.graphql;
 import org.jahia.osgi.BundleUtils;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionWrapper;
+import org.jahia.services.usermanager.JahiaGroupManagerService;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.usermanager.JahiaUserManagerService;
 import org.osgi.service.component.annotations.Component;
 
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Single place owning "who may see / act on which task" for the task board,
@@ -61,26 +66,95 @@ public class TaskAuthorizationService {
     }
 
     /**
-     * Whether {@code user} owns {@code taskNode} (is its assignee) or is eligible to
-     * self-assign it (listed in its {@code candidates}).
+     * Every identifier under which {@code user} can legitimately appear in a task's
+     * {@code candidates} property: their own user identity, plus every group they are a
+     * member of (transitively -- {@code getMembershipByPath} already flattens nested groups).
+     *
+     * <p>Format: {@code candidates} stores JCR paths, for both kinds of principal. Core writes
+     * that property in JBPMTaskLifeCycleEventListener#createTask from
+     * {@code JahiaGroup#getGroupKey()} / {@code JahiaUser#getUserKey()}, and in Jahia 8 both of
+     * those return the principal's JCR path (JahiaGroupImpl/JahiaUserImpl return their {@code path}
+     * field verbatim) -- e.g. {@code /users/jb/ac/eh/pam}, {@code /groups/administrators},
+     * {@code /sites/luxe/groups/site-administrators}. That is the same shape
+     * {@link JahiaGroupManagerService#getMembershipByPath} returns, so group memberships can be
+     * matched against candidate values directly, with no key/path translation. Both
+     * {@code getUserKey()} and {@code getLocalPath()} are added because the two are only
+     * guaranteed to coincide for the default JCR user provider -- a custom provider may key its
+     * users differently from where they are mounted in the JCR.
+     *
+     * <p>This restores what the legacy JSPs did via {@code user:getUserMembership} (whose map keys
+     * are exactly these membership paths), with one deliberate difference: that taglib drops the
+     * built-in "everyone" groups (paths ending in {@code /guest}, {@code /users},
+     * {@code /site-users}) because it exists to render a user's *interesting* group list. Those
+     * are real memberships, so they are kept here -- a task that explicitly lists {@code
+     * /groups/users} among its candidates is one whose workflow role was granted to all users, and
+     * dropping it would silently deny a candidacy the administrator did grant.
      */
-    public boolean isOwnerOrCandidate(JCRNodeWrapper taskNode, JahiaUser user) throws RepositoryException {
-        String assigneeKey = taskNode.getPropertyAsString("assigneeUserKey");
-        if (assigneeKey != null && assigneeKey.equals(user.getUserKey())) {
-            return true;
+    public Set<String> getCandidateIdentifiers(JahiaUser user) {
+        if (user == null || JahiaUserManagerService.isGuest(user)) {
+            return Collections.emptySet();
         }
+        // Insertion-ordered so the generated bind-variable order (and therefore the query string)
+        // is stable for a given user, which keeps JCR's parsed-query cache effective.
+        Set<String> identifiers = new LinkedHashSet<>();
+        addIfNotBlank(identifiers, user.getUserKey());
+        addIfNotBlank(identifiers, user.getLocalPath());
 
-        if (!taskNode.hasProperty("candidates")) {
+        List<String> memberships = JahiaGroupManagerService.getInstance().getMembershipByPath(user.getLocalPath());
+        if (memberships != null) {
+            for (String membership : memberships) {
+                addIfNotBlank(identifiers, membership);
+            }
+        }
+        return identifiers;
+    }
+
+    private static void addIfNotBlank(Set<String> identifiers, String value) {
+        if (value != null && !value.isEmpty()) {
+            identifiers.add(value);
+        }
+    }
+
+    /**
+     * Whether {@code taskNode} lists any of {@code candidateIdentifiers} (the caller-supplied
+     * result of {@link #getCandidateIdentifiers}) among its {@code candidates}.
+     *
+     * <p>Takes the already-expanded set rather than a {@link JahiaUser} so a caller iterating many
+     * task rows expands the viewer's group membership once for the whole request instead of once
+     * per row -- {@link #getCandidateIdentifiers} hits the membership cache and, for a global user,
+     * additionally walks every site.
+     */
+    public boolean isCandidate(JCRNodeWrapper taskNode, Set<String> candidateIdentifiers) throws RepositoryException {
+        if (candidateIdentifiers == null || candidateIdentifiers.isEmpty() || !taskNode.hasProperty("candidates")) {
             return false;
         }
-
         for (Value candidate : taskNode.getProperty("candidates").getValues()) {
-            String candidateValue = candidate.getString();
-            if (candidateValue.equals(user.getUserKey()) || candidateValue.equals(user.getLocalPath())) {
+            if (candidateIdentifiers.contains(candidate.getString())) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Whether {@code user} owns {@code taskNode} (is its assignee) or is eligible to
+     * self-assign it (listed in its {@code candidates}, directly or through one of their groups).
+     */
+    public boolean isOwnerOrCandidate(JCRNodeWrapper taskNode, JahiaUser user) throws RepositoryException {
+        return isOwnerOrCandidate(taskNode, user, getCandidateIdentifiers(user));
+    }
+
+    /**
+     * {@link #isOwnerOrCandidate(JCRNodeWrapper, JahiaUser)} against a pre-computed identifier set,
+     * for callers that already expanded it once for the whole request.
+     */
+    public boolean isOwnerOrCandidate(JCRNodeWrapper taskNode, JahiaUser user, Set<String> candidateIdentifiers)
+            throws RepositoryException {
+        String assigneeKey = taskNode.getPropertyAsString("assigneeUserKey");
+        if (assigneeKey != null && assigneeKey.equals(user.getUserKey())) {
+            return true;
+        }
+        return isCandidate(taskNode, candidateIdentifiers);
     }
 
     /**

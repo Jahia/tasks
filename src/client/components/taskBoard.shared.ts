@@ -41,6 +41,8 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     possibleOutcomes
                     description
                     workflowSummary
+                    viewerRole
+                    candidateDisplayNames
                     targetNode {
                         url
                         property(name: "jcr:title") {
@@ -76,6 +78,8 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     possibleOutcomes
                     description
                     workflowSummary
+                    viewerRole
+                    candidateDisplayNames
                     targetNode {
                         url
                         property(name: "jcr:title") {
@@ -141,6 +145,11 @@ export type TaskBoardNode = {
     possibleOutcomes: string[];
     description: string | null;
     workflowSummary: string | null;
+    // "assignee" | "candidate" | "none" -- kept as a plain string rather than a union, mirroring
+    // the server's deliberately non-enum GraphQL field (see GqlTaskBoard#getViewerRole), so a role
+    // added later doesn't turn into a type error here before anything consumes it.
+    viewerRole: string;
+    candidateDisplayNames: string[];
     targetNode: {url: string; property: {value: string} | null} | null;
 };
 
