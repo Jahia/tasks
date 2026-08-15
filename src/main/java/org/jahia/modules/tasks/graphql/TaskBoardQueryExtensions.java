@@ -79,12 +79,14 @@ public final class TaskBoardQueryExtensions {
     @GraphQLField
     @GraphQLConnection(connectionFetcher = DXPaginatedDataConnectionFetcher.class)
     @GraphQLDescription("Paginated task board (jnt:task / jnt:workflowTask), scoped by the caller's role: "
-            + "Admin/Reviewer sees every task, Contributor sees only their own, Public sees nothing")
+            + "Admin/Reviewer sees every task; a Contributor sees the ones they own, created, or are an "
+            + "eligible candidate for (directly or through one of their groups); Public sees nothing")
     public static DXPaginatedData<GqlTaskBoard> taskBoard(
             @GraphQLName("sortBy")
-            @GraphQLDescription("Either a board column -- title, creator, owner or state, sorted by the same "
-                    + "resolved value the UI displays -- or a raw property (jcr:created, jcr:lastModified, "
-                    + "dueDate) for a JCR-level sort. Defaults to jcr:created.")
+            @GraphQLDescription("Either a board column -- title, creator, owner or state, sorted in-memory by the "
+                    + "same resolved value the UI displays -- or one of the raw date properties jcr:created "
+                    + "(creation date), jcr:lastModified (last update) or dueDate, sorted by JCR itself. "
+                    + "Anything else falls back to jcr:created, which is also the default.")
             String sortBy,
             @GraphQLName("sortOrder")
             @GraphQLDescription("ascending/asc or descending/desc (defaults to desc)")
@@ -107,7 +109,13 @@ public final class TaskBoardQueryExtensions {
             return PaginationHelper.paginate(Stream.empty(), n -> "", paginationArguments);
         }
 
-        boolean canReviewAll = TaskAuthorizationService.get().canReviewAllTasks(session.getNode("/"));
+        TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
+        boolean canReviewAll = authorizationService.canReviewAllTasks(session.getNode("/"));
+
+        // Expanded once here and handed to every row below (see GqlTaskBoard's constructor):
+        // resolving it is a membership-cache lookup plus a walk over every site, which has no
+        // business running again per row for viewerRole/isAssignableToMe.
+        Set<String> candidateIdentifiers = authorizationService.getCandidateIdentifiers(user);
 
         List<String> bindNames = new ArrayList<>();
         List<Value> bindValues = new ArrayList<>();
@@ -118,11 +126,13 @@ public final class TaskBoardQueryExtensions {
             // Admin/Reviewer's WHERE clause stays valid JCR-SQL2 with no owner scoping.
             statement.append("task.[jcr:createdBy] is not null");
         } else {
-            statement.append("(task.assigneeUserKey = $userKey or task.[jcr:createdBy] = $userName)");
+            statement.append("(task.assigneeUserKey = $userKey or task.[jcr:createdBy] = $userName");
             bindNames.add("userKey");
             bindValues.add(session.getValueFactory().createValue(user.getUserKey()));
             bindNames.add("userName");
             bindValues.add(session.getValueFactory().createValue(user.getName()));
+            appendCandidateFilter(statement, candidateIdentifiers, bindNames, bindValues, session);
+            statement.append(")");
         }
 
         appendStateFilter(statement, filterState, bindNames, bindValues, session);
@@ -144,7 +154,7 @@ public final class TaskBoardQueryExtensions {
 
         JCRNodeIteratorWrapper nodes = query.execute().getNodes();
         Stream<GqlTaskBoard> stream = StreamSupport.stream(nodes.spliterator(), false)
-                .map(GqlTaskBoard::new);
+                .map(node -> new GqlTaskBoard(node, candidateIdentifiers));
 
         // Not part of the JCR-SQL2 statement above: title/assignee are resolved values (the
         // stored jcr:title can be a "##resourceBundle(...)##" macro, and assigneeUserKey is a
@@ -167,6 +177,26 @@ public final class TaskBoardQueryExtensions {
         }
 
         return PaginationHelper.paginate(stream, task -> PaginationHelper.encodeCursor(task.getId()), paginationArguments);
+    }
+
+    // Split out of taskBoard() above -- appends "or task.candidates = $candidate0 or ..." to the
+    // non-reviewer visibility clause, one bind variable per identifier the viewer can be listed
+    // under (their own user key/path plus every group they belong to, see
+    // TaskAuthorizationService#getCandidateIdentifiers).
+    //
+    // "task.candidates = $x" is a match-any-value comparison on the multivalued candidates
+    // property in JCR-SQL2, so one equality per identifier is all that's needed -- exactly the
+    // or-chain the legacy JSPs built by hand, except every value is bound rather than
+    // string-concatenated into the statement (jahia-injection-defense).
+    private static void appendCandidateFilter(StringBuilder statement, Set<String> candidateIdentifiers,
+            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        int index = 0;
+        for (String identifier : candidateIdentifiers) {
+            String bindName = "candidate" + index++;
+            statement.append(" or task.candidates = $").append(bindName);
+            bindNames.add(bindName);
+            bindValues.add(session.getValueFactory().createValue(identifier));
+        }
     }
 
     // Split out of taskBoard() above to keep its own cognitive complexity down -- appends the
