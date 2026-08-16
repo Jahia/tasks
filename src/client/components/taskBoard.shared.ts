@@ -72,7 +72,6 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             state
             dueDate
             priority
-            icsUrl(language: $language)
             possibleOutcomeDetails(language: $language) {
                 name
                 displayLabel
@@ -205,11 +204,6 @@ export type TaskBoardNode = {
     // "low" | "normal" | "high" -- jnt:task's own choicelist (definitions.cnd). Kept a plain
     // string for the same reason viewerRole is: the server returns the stored value verbatim.
     priority: string | null;
-    // Ready-made link to this task's iCalendar (.ics) rendering, built server-side (see
-    // GqlTaskBoard#getIcsUrl) because the context path and workspace/locale URL shape are the
-    // server's to know, not the island's. Null exactly when dueDate is null -- a VTODO without
-    // a DUE line is what that view would otherwise fail to render.
-    icsUrl: string | null;
     possibleOutcomeDetails: TaskBoardOutcome[];
     description: string | null;
     workflowSummary: string | null;

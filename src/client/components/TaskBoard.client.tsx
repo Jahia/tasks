@@ -500,23 +500,20 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
 type DueCellProps = {
     dueDate: string | null;
     state: string | null;
-    icsUrl: string | null;
-    // Only used to name the iCal link for assistive technology -- see its aria-label below.
-    taskTitle: string | null;
     locale: string;
 };
 
-// The Due column's cell (#66): the date, an "Overdue" chip once it has passed on a task that is
-// still open, and the iCalendar export the legacy board offered whenever a due date was set.
+// The Due column's cell (#66): the date, and an "Overdue" chip once it has passed on a task that
+// is still open.
 //
-// The export link lives HERE rather than among the row's actions: it exists if and only if the
-// task has a due date, which is exactly what this cell is about, and the Actions column is
-// already the busiest one on the board. It is also not an action on the task -- nothing about the
-// task changes -- so putting it beside Assign/Start/Suspend would misrepresent it.
+// The .ics export link #66 also put here was dropped again by the product owner (#65): the board
+// is a worklist, not a calendar feed. The .ics VIEW itself (jnt_task/ics/task.jsp, plus the
+// org.jahia.taglibs imports its taglib needs -- see pom.xml) stays, since it is a shipped view of
+// the module and was broken independently of this board.
 //
 // Renders nothing at all when there is no due date: an empty cell says "no deadline" more
 // directly than a placeholder dash, and most workflow tasks have none.
-function DueCell({dueDate, state, icsUrl, taskTitle, locale}: Readonly<DueCellProps>) {
+function DueCell({dueDate, state, locale}: Readonly<DueCellProps>) {
     const {t} = useTasksTranslation();
     const formatted = formatDate(locale, 'short', dueDate);
     if (!formatted) {
@@ -532,24 +529,6 @@ function DueCell({dueDate, state, icsUrl, taskTitle, locale}: Readonly<DueCellPr
             {/* The overdue signal is this WORD, on a chip that is additionally red -- the colour
                 repeats it, it never carries it alone (same rule the Waiting chip follows). */}
             {status === 'overdue' && <Chip label={t('board.due.overdue', 'Overdue')} color="danger"/>}
-            {icsUrl && (
-                <a
-                    className="task-board__ics-link"
-                    href={icsUrl}
-                    // "iCal" is as short as the 140px column allows, with the sentence-long version
-                    // as the tooltip. The accessible name additionally NAMES THE TASK: out of
-                    // context a screen reader otherwise announces a page full of identically
-                    // labelled "iCal" links with nothing to tell them apart.
-                    title={t('board.due.icsHint', 'Download this task as a calendar entry (.ics)')}
-                    aria-label={taskTitle
-                        ? t('board.due.icsLabel', 'Download "{{title}}" as a calendar entry (.ics)', {title: taskTitle})
-                        : t('board.due.icsHint', 'Download this task as a calendar entry (.ics)')}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
-                    {t('board.due.ics', 'iCal')}
-                </a>
-            )}
         </div>
     );
 }
@@ -763,8 +742,8 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         {
             key: 'dueDate',
             label: t('board.columns.due', 'Due'),
-            // Wider than the other fixed columns: the cell stacks a date, an "Overdue" chip and
-            // the iCal link, and 120px would break "Aug 15, 2026" across two lines.
+            // Wider than the other fixed columns: the cell stacks a date and an "Overdue" chip,
+            // and 120px would break "Aug 15, 2026" across two lines.
             width: '140px',
             // Sorted server-side on the raw dueDate property, which is on its allow-list and so
             // stays on the query-level fast path (#64) -- see COLUMN_SORT_ARGUMENT.
@@ -773,8 +752,6 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                 <DueCell
                     dueDate={data.dueDate}
                     state={data.state}
-                    icsUrl={data.icsUrl}
-                    taskTitle={data.title}
                     locale={locale}
                 />
             )

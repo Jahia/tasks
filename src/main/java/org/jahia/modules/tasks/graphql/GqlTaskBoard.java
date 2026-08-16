@@ -55,11 +55,6 @@ public class GqlTaskBoard {
     // data attached to a task, e.g. a jnt:simpleWorkflow.
     private static final String TASK_DATA_NODE = "taskData";
 
-    // The two ends of getIcsUrl()'s one string edit -- core renders a content node's URL through
-    // the html template type, and this module's calendar view is the same URL under .ics.
-    private static final String HTML_EXTENSION = ".html";
-    private static final String ICS_EXTENSION = ".ics";
-
     private final JCRNodeWrapper node;
 
     // Everything this row shares with the other rows of the same request: the viewer's expanded
@@ -180,49 +175,10 @@ public class GqlTaskBoard {
         return node.getPropertyAsString("dueDate");
     }
 
-    @GraphQLField
-    @GraphQLDescription("Link to this task's iCalendar rendering -- the module's own \"<task path>.ics\" view "
-            + "(jnt_task/ics/task.jsp), which emits a VTODO for it. Null when the task has no dueDate: that view's "
-            + "DUE line is built from it unconditionally, so a task without one has no calendar entry to offer.")
-    public String getIcsUrl(
-            @GraphQLName("language")
-            @GraphQLDescription("Language code to build the link's locale segment from (e.g. \"fr\", \"fr_FR\"), "
-                    + "which decides the language the calendar entry's SUMMARY is rendered in. Omitting it, or "
-                    + "passing one that isn't a language code, uses the request's own locale.")
-            String language) {
-        // Deliberately gated on the raw property rather than on getDueDate(): both read the same
-        // value, and this way the field's null-ness and the DUE line's existence are decided by
-        // exactly the same expression.
-        String dueDate = node.getPropertyAsString("dueDate");
-        if (dueDate == null || dueDate.isEmpty()) {
-            return null;
-        }
-        try {
-            // Same re-resolution as getTargetNode() above, for the same reason: this class's own
-            // session is opened without a locale, and core's URL builder writes a literal "null"
-            // into the language segment of a node read through it. Building the URL by hand from
-            // the context path + workspace + locale would avoid the extra lookup, but would also
-            // restate core's URL shape here -- this way the only part of it we own is the
-            // extension.
-            Locale locale = resolveLocale(language);
-            JCRSessionWrapper localizedSession = JCRSessionFactory.getInstance()
-                    .getCurrentUserSession(Constants.EDIT_WORKSPACE, locale);
-            String url = localizedSession.getNodeByIdentifier(node.getIdentifier()).getUrl();
-            if (url == null) {
-                return null;
-            }
-            // "<...>/<path>.html" -> "<...>/<path>.ics": getUrl() renders a content node through
-            // the default (html) template type, and the ics view is the same node's URL under a
-            // different extension. Guarded rather than assumed, so a node whose URL doesn't end
-            // that way (a provider serving it some other way) yields no link instead of a broken one.
-            if (!url.endsWith(HTML_EXTENSION)) {
-                return null;
-            }
-            return url.substring(0, url.length() - HTML_EXTENSION.length()) + ICS_EXTENSION;
-        } catch (RepositoryException e) {
-            throw new TaskGraphQLException("Unable to build the task's iCalendar URL", e);
-        }
-    }
+    // No icsUrl field: #66 offered the board a ready-made link to the module's own
+    // "<task path>.ics" view, and the product owner dropped that surface again (#65). The VIEW is
+    // untouched -- jnt_task/ics/task.jsp and the org.jahia.taglibs imports it needs (pom.xml) are
+    // repairs to a shipped view, independent of whether this board links to it.
 
     @GraphQLField
     @GraphQLDescription("Outcomes this task can be completed with (workflow-specific; empty when none are declared)")

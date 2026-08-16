@@ -76,10 +76,7 @@
       "weeks_plural": "{{count}} weeks"
     },
     "due": {
-      "overdue": "Overdue",
-      "ics": "iCal",
-      "icsHint": "Download this task as a calendar entry (.ics)",
-      "icsLabel": "Download \"{{title}}\" as a calendar entry (.ics)"
+      "overdue": "Overdue"
     },
     "actions": {
       "addComment": "Add a comment",

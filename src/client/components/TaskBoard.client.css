@@ -159,9 +159,9 @@
     gap: var(--spacing-small);
 }
 
-/* The Due column's cell: date, then the "Overdue" chip and the iCal link underneath it. Stacked
-   rather than inline because the column is 140px and a chip beside a date would overflow it;
-   align-items keeps the chip from stretching to the full cell width. */
+/* The Due column's cell: date, then the "Overdue" chip underneath it. Stacked rather than inline
+   because the column is 140px and a chip beside a date would overflow it; align-items keeps the
+   chip from stretching to the full cell width. */
 .task-board__due-cell {
     display: flex;
     flex-direction: column;
@@ -169,23 +169,15 @@
     gap: 2px;
 }
 
-/* The linked target page's own title, shown beside the task title, and the Due cell's iCalendar
-   link -- distinct from the rest of the plain cell text, since they're the clickable parts. */
-.task-board__target-link,
-.task-board__ics-link {
+/* The linked target page's own title, shown beside the task title -- distinct from the rest of
+   the plain cell text, since it is the clickable part. */
+.task-board__target-link {
     color: var(--color-accent_dark120, var(--color-accent));
     text-decoration: none;
 }
 
-.task-board__target-link:hover,
-.task-board__ics-link:hover {
+.task-board__target-link:hover {
     text-decoration: underline;
-}
-
-/* The iCal link is secondary to the date above it -- same caption size as the Task cell's
-   created-by line, so it doesn't compete with the date for attention. */
-.task-board__ics-link {
-    font-size: var(--fontSize-caption, 0.75rem);
 }
 
 .task-board__meta,

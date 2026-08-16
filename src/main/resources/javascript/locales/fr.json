@@ -76,10 +76,7 @@
       "weeks_plural": "{{count}} semaines"
     },
     "due": {
-      "overdue": "En retard",
-      "ics": "iCal",
-      "icsHint": "Télécharger cette tâche comme entrée d'agenda (.ics)",
-      "icsLabel": "Télécharger « {{title}} » comme entrée d'agenda (.ics)"
+      "overdue": "En retard"
     },
     "actions": {
       "addComment": "Ajouter un commentaire",

@@ -76,10 +76,7 @@
       "weeks_plural": "{{count}} Wochen"
     },
     "due": {
-      "overdue": "Überfällig",
-      "ics": "iCal",
-      "icsHint": "Diese Aufgabe als Kalendereintrag (.ics) herunterladen",
-      "icsLabel": "„{{title}}“ als Kalendereintrag (.ics) herunterladen"
+      "overdue": "Überfällig"
     },
     "actions": {
       "addComment": "Kommentar hinzufügen",
