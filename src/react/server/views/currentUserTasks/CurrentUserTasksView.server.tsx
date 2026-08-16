@@ -1,6 +1,6 @@
 import {jahiaComponent, Island, useGQLQuery, buildEndpointUrl} from '@jahia/javascript-modules-library';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../../../../client/components/TaskBoard.client';
-import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../../../../client/components/taskBoard.shared';
+import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES, pickInitialScope} from '../../../../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../../../../client/components/taskBoard.shared';
 
 // Must match TaskBoard's own itemsPerPage default -- see TasksDashboardApp's identical constant
@@ -32,13 +32,17 @@ jahiaComponent(
         }
 
         const result = data as InitialTaskBoardQueryResult;
+        // Same decision as the dashboard route: the query returns page 1 of all three scopes, the
+        // board opens on the first non-empty one and receives that scope's page.
+        const initialScope = pickInitialScope(result);
 
         return (
             <div className="task-board">
                 <Island
                     component={TaskBoard}
                     props={{
-                        initialConnection: result.taskBoard,
+                        initialConnection: result[initialScope],
+                        initialScope,
                         graphqlEndpoint: buildEndpointUrl('/modules/graphql'),
                         currentUserKey: result.taskBoardCurrentUserKey,
                         canReviewAll: result.taskBoardCanReviewAll

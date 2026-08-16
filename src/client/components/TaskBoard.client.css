@@ -29,14 +29,6 @@
     gap: var(--spacing-medium);
 }
 
-.task-board__toolbar-controls {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--spacing-large);
-}
-
-.task-board__sort,
 .task-board__search {
     display: flex;
     align-items: center;
@@ -47,24 +39,16 @@
     width: 260px;
 }
 
-.task-board__list {
+/* The Task column's cell: title line, then the workflow summary and the created-by/candidates
+   captions underneath it. A table cell is vertically centred by default, which reads badly for a
+   three-line cell sitting next to one-line ones, hence the explicit column layout. */
+.task-board__task-cell {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-medium);
+    gap: 2px;
 }
 
-.task-board__card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-small);
-    padding: var(--spacing-medium);
-
-    border: 1px solid var(--color-gray_light);
-    border-radius: 4px;
-    background-color: var(--color-white);
-}
-
-.task-board__card-header {
+.task-board__task-title {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
@@ -72,7 +56,7 @@
 }
 
 /* The linked target page's own title, shown beside the task title -- distinct from the rest of
-   the card's plain text, since it's the one piece of this header that's actually clickable. */
+   the cell's plain text, since it's the one piece of it that's actually clickable. */
 .task-board__target-link {
     color: var(--color-accent_dark120, var(--color-accent));
     text-decoration: none;
@@ -85,13 +69,6 @@
 .task-board__meta,
 .task-board__summary {
     margin: 0;
-}
-
-.task-board__badges {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--spacing-medium);
 }
 
 .task-board__actions {

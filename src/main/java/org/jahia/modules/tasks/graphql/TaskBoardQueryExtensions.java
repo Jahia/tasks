@@ -102,6 +102,27 @@ public final class TaskBoardQueryExtensions {
     private static final Set<String> RESOLVED_VALUE_SORT_FIELDS = new HashSet<>(Arrays.asList(
             "title", "creator", "owner", STATE_FIELD));
 
+    // The board's "mine vs. my group's" split (#61). Deliberately a further NARROWING of the
+    // visibility clause each caller already gets, never a widening of it: a contributor stays
+    // scoped to what they may see, and a reviewer's "all" stays their full view. Values are plain
+    // strings rather than a GraphQL enum, matching sortBy/sortOrder above. The third value, "all",
+    // needs no constant of its own: it means "no narrowing", which is also what any unrecognized
+    // value degrades to -- see appendScopeFilter.
+    private static final String SCOPE_ASSIGNED_TO_ME = "assignedToMe";
+    private static final String SCOPE_CLAIMABLE = "claimable";
+
+    // "Nobody has taken this task yet". Two conditions, not one: a task that was never assigned has
+    // no assigneeUserKey property at all, while unassignTask writes an empty string back (see
+    // TaskBoardMutationExtensions#unassignTask), and JCR-SQL2's "is null" only covers the first.
+    // The empty literal is a constant of this class, not caller input, so it needs no bind variable.
+    private static final String UNASSIGNED_CONDITION =
+            "(task.assigneeUserKey is null or task.assigneeUserKey = '')";
+
+    // An always-false condition that is still valid JCR-SQL2, used when a scope provably matches
+    // nothing (see appendScopeFilter). Mirror image of the canReviewAll branch's always-true
+    // "jcr:createdBy is not null": every task node has jcr:createdBy.
+    private static final String NEVER_MATCHES_CONDITION = "task.[jcr:createdBy] is null";
+
     @GraphQLField
     @GraphQLConnection(connectionFetcher = DXPaginatedDataConnectionFetcher.class)
     @GraphQLDescription("Paginated task board (jnt:task / jnt:workflowTask), scoped by the caller's role: "
@@ -126,6 +147,14 @@ public final class TaskBoardQueryExtensions {
             @GraphQLDescription("Case-insensitive substring match against title, creator, assignee and state; "
                     + "matches if any one of them contains it")
             String search,
+            @GraphQLName("scope")
+            @GraphQLDescription("Narrows the caller's own visibility further: \"assignedToMe\" keeps only the tasks "
+                    + "they are the current assignee of; \"claimable\" keeps only the unassigned tasks they are an "
+                    + "eligible candidate for (directly or through one of their groups); \"all\" (the default, and "
+                    + "what any unrecognized value falls back to) keeps everything they may see. Applies to "
+                    + "reviewers too -- a reviewer with no candidacy of their own gets an empty \"claimable\", "
+                    + "since being able to act on every task is not the same as being eligible to take one.")
+            String scope,
             DataFetchingEnvironment environment) throws RepositoryException {
 
         JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
@@ -156,7 +185,7 @@ public final class TaskBoardQueryExtensions {
         TaskBoardRequestContext context = new TaskBoardRequestContext(candidateIdentifiers);
 
         QueryPlan plan = buildQueryPlan(session, user, canReviewAll, candidateIdentifiers, filterState,
-                sortBy, sortOrder);
+                sortBy, sortOrder, scope);
 
         // The two values below are what decides between the two pagination paths: both force rows
         // to be filtered/sorted after the query, on values JCR-SQL2 never saw, so neither can be
@@ -450,7 +479,7 @@ public final class TaskBoardQueryExtensions {
     }
 
     private static QueryPlan buildQueryPlan(JCRSessionWrapper session, JahiaUser user, boolean canReviewAll,
-            Set<String> candidateIdentifiers, List<String> filterState, String sortBy, String sortOrder)
+            Set<String> candidateIdentifiers, List<String> filterState, String sortBy, String sortOrder, String scope)
             throws RepositoryException {
 
         List<String> bindNames = new ArrayList<>();
@@ -470,6 +499,10 @@ public final class TaskBoardQueryExtensions {
             appendCandidateFilter(statement, candidateIdentifiers, bindNames, bindValues, session);
             statement.append(")");
         }
+
+        // Composed INTO the statement rather than applied to the rows afterwards, so that a scoped
+        // board still takes the query-level fast path (#64) instead of falling back to a scan.
+        appendScopeFilter(statement, scope, user, candidateIdentifiers, bindNames, bindValues, session);
 
         appendStateFilter(statement, filterState, bindNames, bindValues, session);
 
@@ -500,20 +533,77 @@ public final class TaskBoardQueryExtensions {
     // the non-reviewer visibility clause, one bind variable per identifier the viewer can be
     // listed under (their own user key/path plus every group they belong to, see
     // TaskAuthorizationService#getCandidateIdentifiers).
-    //
-    // "task.candidates = $x" is a match-any-value comparison on the multivalued candidates
-    // property in JCR-SQL2, so one equality per identifier is all that's needed -- exactly the
-    // or-chain the legacy JSPs built by hand, except every value is bound rather than
-    // string-concatenated into the statement (jahia-injection-defense).
     private static void appendCandidateFilter(StringBuilder statement, Set<String> candidateIdentifiers,
             List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        String matches = candidateMatches(candidateIdentifiers, "candidate", bindNames, bindValues, session);
+        if (!matches.isEmpty()) {
+            statement.append(" or ").append(matches);
+        }
+    }
+
+    /**
+     * {@code task.candidates = $prefix0 or task.candidates = $prefix1 or ...}, one equality per
+     * identifier the viewer can be listed under, with every value registered as a bind variable.
+     * Empty when the viewer has no candidate identifier at all -- callers decide what that means.
+     *
+     * <p>{@code task.candidates = $x} is a match-any-value comparison on the multivalued
+     * {@code candidates} property in JCR-SQL2, so one equality per identifier is all that's needed
+     * -- exactly the or-chain the legacy JSPs built by hand, except every value is bound rather
+     * than string-concatenated into the statement (jahia-injection-defense). The bind-name prefix
+     * exists because the visibility clause and the {@code claimable} scope filter can both need
+     * this chain in the same statement, and a bind name may only be declared once.
+     */
+    private static String candidateMatches(Set<String> candidateIdentifiers, String bindPrefix,
+            List<String> bindNames, List<Value> bindValues, JCRSessionWrapper session) throws RepositoryException {
+        StringBuilder matches = new StringBuilder();
         int index = 0;
         for (String identifier : candidateIdentifiers) {
-            String bindName = "candidate" + index++;
-            statement.append(" or task.candidates = $").append(bindName);
+            if (index > 0) {
+                matches.append(" or ");
+            }
+            String bindName = bindPrefix + index++;
+            matches.append("task.candidates = $").append(bindName);
             bindNames.add(bindName);
             bindValues.add(session.getValueFactory().createValue(identifier));
         }
+        return matches.toString();
+    }
+
+    /**
+     * Split out of buildQueryPlan() above -- the {@code scope} argument's "and (...)", narrowing
+     * whatever the visibility clause already allows down to the viewer's own slice of it.
+     *
+     * <ul>
+     *   <li>{@code assignedToMe}: the tasks they currently hold. Note this is the assignee, not
+     *       "owner-or-candidate" -- a task merely offered to them is not one of theirs yet.</li>
+     *   <li>{@code claimable}: the ones they could take, i.e. listed as a candidate AND still
+     *       unassigned. A viewer with no candidate identifier at all (only really possible for a
+     *       principal with no identity to match on) gets a provably empty board rather than an
+     *       unconstrained one -- the same conservative direction as the rest of this clause.</li>
+     *   <li>anything else, including null: no narrowing.</li>
+     * </ul>
+     */
+    private static void appendScopeFilter(StringBuilder statement, String scope, JahiaUser user,
+            Set<String> candidateIdentifiers, List<String> bindNames, List<Value> bindValues,
+            JCRSessionWrapper session) throws RepositoryException {
+
+        if (SCOPE_ASSIGNED_TO_ME.equals(scope)) {
+            statement.append(" and task.assigneeUserKey = $scopeUserKey");
+            bindNames.add("scopeUserKey");
+            bindValues.add(session.getValueFactory().createValue(user.getUserKey()));
+            return;
+        }
+        if (!SCOPE_CLAIMABLE.equals(scope)) {
+            // "all", null, or an unrecognized value: the board stays exactly as wide as the
+            // caller's own visibility clause made it.
+            return;
+        }
+        String matches = candidateMatches(candidateIdentifiers, "scopeCandidate", bindNames, bindValues, session);
+        if (matches.isEmpty()) {
+            statement.append(" and ").append(NEVER_MATCHES_CONDITION);
+            return;
+        }
+        statement.append(" and (").append(matches).append(")").append(" and ").append(UNASSIGNED_CONDITION);
     }
 
     // Split out of buildQueryPlan() above to keep its own cognitive complexity down -- appends the
