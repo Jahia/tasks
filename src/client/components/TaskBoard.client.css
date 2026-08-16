@@ -73,15 +73,47 @@
 
 /* The Task column carries the row's main content, but an unsized DataTable column gets a fixed
    default width rather than the remaining space -- let it (header and body alike, rows being flex
-   containers) absorb whatever the fixed-width columns leave over. */
+   containers) absorb whatever the fixed-width columns leave over. Rows must never wrap: on a
+   narrow viewport a wrapped flex row scatters the State/Actions cells underneath the Task cell,
+   which reads as a broken table -- below the table's minimum usable width the board scrolls
+   horizontally instead (overflow-x on the same element that already scrolls vertically). */
+.task-board__content {
+    overflow-x: auto;
+
+    /* Both required for overflow-x to ever engage: as a flex item this element's min-width
+       defaults to its content's intrinsic width, so without these it GROWS past its parent
+       (whose overflow is visible, on a page whose body is overflow:hidden) and the table's
+       right-hand columns become unreachable instead of scrollable. */
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* moonstone-alpha's ContentLayout has the same flex-item gap one level up: its paper chain has
+   no min-width:0, so it sizes to the table's max-content width and pushes the whole dashboard
+   past the (overflow:hidden) viewport instead of letting the board's own overflow-x engage.
+   Constrained from here until the alpha component ships its own containment; class names are
+   the component's stable public ones, not hashed. :where() keeps specificity at zero. */
+:where(.moonstoneAlpha-contentLayout_paperContainer, .moonstoneAlpha-contentLayout_paper) {
+    min-width: 0;
+    max-width: 100%;
+}
+
 .task-board__content table {
     width: 100%;
+    min-width: 760px;
+}
+
+.task-board__content thead tr,
+.task-board__content tbody tr {
+    flex-wrap: nowrap;
 }
 
 .task-board__content thead th:first-child,
 .task-board__content tbody td:first-child {
-    flex: 1 1 auto;
-    min-width: 220px;
+    /* Basis 0, not auto: with auto the basis is the cell's unwrapped text width, which inflates
+       the whole row to the longest summary line instead of letting the text wrap in place. */
+    flex: 1 1 0;
+    min-width: 200px;
 }
 
 .task-board__content tbody td {
