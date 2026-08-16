@@ -55,6 +55,10 @@ public class GqlTaskBoard {
     // data attached to a task, e.g. a jnt:simpleWorkflow.
     private static final String TASK_DATA_NODE = "taskData";
 
+    // Namespace for the candidate "displayable name" entries in the per-request display-name memo,
+    // which the account-name lookups share -- see resolveCandidateDisplayName().
+    private static final String DISPLAYABLE_NAME_MEMO_PREFIX = "displayable:";
+
     private final JCRNodeWrapper node;
 
     // Everything this row shares with the other rows of the same request: the viewer's expanded
@@ -299,10 +303,9 @@ public class GqlTaskBoard {
         }
     }
 
-    // Shared by getAssigneeDisplayName(), getCandidateDisplayNames() and getWorkflowSummary()'s
-    // start-user resolution -- all are "a stored JCR principal path that should resolve to a
-    // readable display name". Works for group paths as well as user paths: both resolve to a node
-    // whose name is what the UI shows.
+    // Shared by getAssigneeDisplayName() and getWorkflowSummary()'s start-user resolution -- both
+    // are "a stored user key that should resolve to the account's own name". Candidates take the
+    // friendlier route instead (see lookUpDisplayableName below).
     //
     // Memoized per request (#64): the same assignee, the same candidate group and the same
     // workflow start user recur across the rows of a page, and each miss is a JCR node lookup.
@@ -320,6 +323,42 @@ public class GqlTaskBoard {
             // Not a resolvable node path on this provider/version -- fall back to the raw key
             // rather than erroring, since legacy data may store it in a different format.
             return userKey;
+        }
+    }
+
+    /**
+     * The label to show for one {@code candidates} value (#60): the principal's own DISPLAYABLE
+     * name rather than its node name -- {@link JCRNodeWrapper#getDisplayableName()}, which returns
+     * the node's {@code jcr:title} when one is set and the node name when it isn't. A group titled
+     * "Task testers (trial)" reads as that instead of as "task-testers"; one with no title set
+     * (e.g. /sites/&lt;site&gt;/groups/site-administrators on a stock site, verified on the bench)
+     * is unchanged, since the fallback IS the node name. Same for user nodes.
+     *
+     * <p>Deliberately not routed through {@link #lookUpUserDisplayName} even though both take a
+     * JCR principal path: the Owner column and the workflow summary name an ACCOUNT ("root"), and
+     * are matched against by the board's search/sort (see TaskBoardQueryExtensions), where an
+     * editable title is the wrong thing to key on.
+     *
+     * <p>Memoized on the same per-request map, under a prefixed key: the two lookups answer
+     * different questions about the SAME paths (a user can be both this task's assignee and
+     * another's candidate), so sharing one key would let whichever field resolved first decide
+     * what the other one shows.
+     */
+    private String resolveCandidateDisplayName(String principalPath) throws RepositoryException {
+        // The resolver reads the captured path, not the memo key it is handed -- the key carries
+        // the namespace prefix, the lookup must not.
+        return context.displayName(DISPLAYABLE_NAME_MEMO_PREFIX + principalPath,
+                memoKey -> lookUpDisplayableName(principalPath));
+    }
+
+    private static String lookUpDisplayableName(String principalPath) throws RepositoryException {
+        try {
+            return JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE)
+                    .getNode(principalPath).getDisplayableName();
+        } catch (PathNotFoundException e) {
+            // Same resilience as lookUpUserDisplayName: a value that doesn't resolve to a node
+            // this viewer can read is shown verbatim rather than failing the whole row.
+            return principalPath;
         }
     }
 
@@ -430,7 +469,8 @@ public class GqlTaskBoard {
 
     @GraphQLField
     @GraphQLDescription("Display names of the principals eligible to take this task, resolved from its raw "
-            + "candidates values (JCR paths of users and groups alike); a value that doesn't resolve to a node "
+            + "candidates values (JCR paths of users and groups alike) to each principal's own displayable name "
+            + "-- its jcr:title where one is set, its node name otherwise; a value that doesn't resolve to a node "
             + "the viewer can read is returned as-is. Empty when the task declares no candidates.")
     public List<String> getCandidateDisplayNames() {
         try {
@@ -439,7 +479,7 @@ public class GqlTaskBoard {
             }
             List<String> displayNames = new ArrayList<>();
             for (Value candidate : node.getProperty("candidates").getValues()) {
-                displayNames.add(resolveUserDisplayName(candidate.getString()));
+                displayNames.add(resolveCandidateDisplayName(candidate.getString()));
             }
             return displayNames;
         } catch (RepositoryException e) {
