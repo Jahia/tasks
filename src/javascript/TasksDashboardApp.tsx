@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {Banner, Loader} from '@jahia/moonstone';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../client/components/TaskBoard.client';
 import {callGraphQL} from '../client/lib/graphqlClient';
+import {useTasksTranslation} from '../client/lib/i18n';
 import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES, pickInitialScope} from '../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.shared';
 
@@ -43,6 +44,10 @@ type LoadState =
  * fetches its own initial page here instead of receiving it as a prop.
  */
 export function TasksDashboardApp() {
+    // This route runs inside the app shell, so i18next is initialized here and init.tsx has already
+    // asked it for the 'tasks' namespace -- these two strings are the only ones this wrapper owns,
+    // the board itself translating everything else.
+    const {t} = useTasksTranslation();
     const [state, setState] = useState<LoadState>({status: 'loading'});
 
     const language = uiLanguage();
@@ -63,7 +68,7 @@ export function TasksDashboardApp() {
             })
             .catch(e => {
                 if (!cancelled) {
-                    setState({status: 'error', message: e instanceof Error ? e.message : 'Unable to load tasks.'});
+                    setState({status: 'error', message: e instanceof Error ? e.message : t('common.error.load', 'Unable to load tasks.')});
                 }
             });
         return () => {
@@ -71,14 +76,14 @@ export function TasksDashboardApp() {
         };
         // Effectively mount-only: uiLanguage() reads a global the page sets before any remote
         // loads, so this never actually changes for the life of the route.
-    }, [language]);
+    }, [language, t]);
 
     if (state.status === 'loading') {
         return <Loader/>;
     }
 
     if (state.status === 'error') {
-        return <Banner title="Something went wrong" variant="danger">{state.message}</Banner>;
+        return <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">{state.message}</Banner>;
     }
 
     // The initial query returns page 1 of all three scopes; the board opens on the first one that

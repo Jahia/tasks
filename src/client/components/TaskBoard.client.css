@@ -49,6 +49,21 @@
     gap: var(--spacing-medium);
 }
 
+/* The scope tabs' tabpanel (#62). Purely an ARIA container -- it exists so each tab has something
+   to point aria-controls at -- so it is made transparent to layout: it re-creates the flex-column
+   context the table and the EmptyData block used to sit in as direct children of
+   .task-board__content. flex-basis stays `auto` (not 0) on purpose: with a basis of 0 the panel
+   would be capped at the free space and a full page of rows would overflow it into a region the
+   scroll container above can no longer reach. flex-grow is what still lets the empty state fill
+   the remaining height, as it did when EmptyData's own flexFluid faced this container directly. */
+.task-board__panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+}
+
 .task-board__search {
     display: flex;
     align-items: center;

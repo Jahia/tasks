@@ -112,10 +112,24 @@
                 <artifactId>maven-clean-plugin</artifactId>
                 <version>3.2.0</version>
                 <configuration>
+                    <!--
+                        Both halves of 'yarn clean' (see package.json), not just the first.
+                        The webpack build deliberately has no `clean: true` (see the long note in
+                        webpack.config.cjs) and writes content-hashed chunk names, so every build
+                        that changes a byte of the federated entry leaves the previous build's
+                        chunks behind in the apps/ directory, which Include-Resource then folds into
+                        the jar whole. The plugin's own default only reaches target/, and this
+                        directory is not under it: before the second fileset below, a
+                        `mvn clean install` shipped 18 dead chunks alongside the live ones (observed
+                        2026-08-16), each a full copy of the board, and a string search over the jar
+                        could only ever return the union of every build ever run in that checkout.
+                    -->
                     <filesets>
                         <fileset>
-                            <!-- equivalent of 'yarn clean' -->
                             <directory>${project.basedir}/dist/</directory>
+                        </fileset>
+                        <fileset>
+                            <directory>${project.basedir}/src/main/resources/javascript/apps/</directory>
                         </fileset>
                     </filesets>
                 </configuration>

@@ -17,8 +17,11 @@ module.exports = (env, argv) => {
             // the previous build's now-stale content-hashed chunk files right as the scanner has
             // them open, which fails the whole build with EBUSY/"used by another process". Old
             // chunks are unreferenced by remoteEntry.js once superseded, so leaving them behind is
-            // functionally harmless -- `mvn clean` (or `yarn clean`, see package.json) already
-            // wipes this directory between real clean builds.
+            // functionally harmless within a dev loop -- and both `yarn clean` (package.json) and
+            // `mvn clean` wipe this directory between real clean builds, so they never accumulate
+            // into the packaged jar. The latter needed an explicit maven-clean-plugin fileset: the
+            // plugin's default only reaches target/, and this directory is not under it (18 stale
+            // chunks had made it into the jar before that was noticed, #62).
         },
         resolve: {
             mainFields: ['module', 'main'],

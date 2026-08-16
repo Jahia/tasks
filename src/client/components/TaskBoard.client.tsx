@@ -10,6 +10,8 @@ import type {DataTableColumn} from '@jahia/moonstone/DataTable';
 // the matching deep path in moonstone-alpha.d.ts.
 import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayout';
 import {callGraphQL} from '../lib/graphqlClient';
+import {formatDate, useTasksTranslation} from '../lib/i18n';
+import type {Translate, TranslatePlural} from '../lib/i18n';
 import {
     ALL_STATES,
     ASSIGN_TASK_TO_ME_MUTATION,
@@ -28,7 +30,7 @@ import {
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
 import type {TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
-import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {priorityLabel, stateLabel, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
 import './TaskBoard.client.css';
 
@@ -39,63 +41,11 @@ const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 // filter over an already-loaded page.
 const SEARCH_DEBOUNCE_MS = 350;
 
-// Every user-visible string on this board, gathered in one object. NOT an i18n mechanism (that's
-// #62) -- just the single place #62 has to reach into, instead of thirty inline literals.
-const labels = {
-    boardTitle: 'Tasks',
-    columnTask: 'Task',
-    columnDue: 'Due',
-    columnPriority: 'Priority',
-    columnWaiting: 'Waiting',
-    columnOwner: 'Owner',
-    columnState: 'State',
-    columnActions: 'Actions',
-    scopeAssignedToMe: 'Assigned to me',
-    scopeClaimable: 'Available to my group(s)',
-    scopeAll: 'All tasks',
-    showFinished: 'Show finished',
-    searchLabel: 'Search:',
-    searchPlaceholder: 'Search tasks...',
-    untitledTask: 'Untitled task',
-    unassigned: 'Unassigned',
-    unknownCreator: 'Unknown',
-    noActions: 'No actions available',
-    emptyBoard: 'No tasks to show.',
-    errorTitle: 'Something went wrong',
-    loadError: 'Unable to load tasks.',
-    actionError: 'Unable to complete this action.',
-    actionAssignToMe: 'Assign to me',
-    actionUnassign: 'Unassign',
-    actionStart: 'Start',
-    actionSuspend: 'Suspend',
-    actionResume: 'Resume',
-    actionPreview: 'Preview',
-    actionComplete: 'Complete',
-    actionAddComment: 'Add a comment',
-    // Tooltip on the one-click decision buttons only (#67). The button itself is labelled with the
-    // workflow's own outcome label ("Publish" / "Reject publication"), which says nothing about the
-    // task also being claimed on the way -- this is where that is stated, without turning every
-    // decision button into a sentence.
-    oneClickHint: 'Assigns this task to you and records your decision in one step',
-    commentPlaceholder: 'Comment (optional)',
-    waitingToday: 'today',
-    waitingUnknown: 'unknown',
-    // The overdue signal is this WORD, on a chip that is additionally red -- the colour repeats it,
-    // it never carries it alone (same rule the Waiting chip follows).
-    dueOverdue: 'Overdue',
-    // The iCalendar export (#66), restored from the legacy board. Short by necessity -- it sits in
-    // a 140px column under the date it exports -- with the sentence-long version as its tooltip.
-    actionIcs: 'iCal',
-    icsHint: 'Download this task as a calendar entry (.ics)',
-    priorityLow: 'Low',
-    priorityNormal: 'Normal',
-    priorityHigh: 'High',
-    taskCount: (count: number) => `${count} task(s)`,
-    waitingDays: (days: number) => (days === 1 ? '1 day' : `${days} days`),
-    waitingWeeks: (weeks: number) => (weeks === 1 ? '1 week' : `${weeks} weeks`),
-    createdBy: (creator: string, date: string) => `Created by: ${creator}, on ${date}`,
-    availableTo: (names: string) => `Available to: ${names}`
-};
+// Every user-visible string on this board goes through useTasksTranslation() (#62), against the
+// 'tasks' namespace in src/main/resources/javascript/locales/{en,fr,de}.json. The second argument
+// of every t() call is the English text: it is both the source-readable label and the value
+// actually rendered on the SSR-island path, where no i18next instance exists to translate against
+// -- see the header of ../lib/i18n.ts.
 
 type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
 
@@ -142,20 +92,24 @@ function waitingDaysSince(createdDate: string | null): number {
     return Math.max(0, Math.floor((Date.now() - created) / MS_PER_DAY));
 }
 
-function waitingLabel(days: number): string {
+// Pluralized through i18next's own count mechanism rather than a ternary, so each language applies
+// its OWN rule to the locale file's "<key>" / "<key>_plural" pair -- French, for instance, keeps
+// the singular at 0 ("0 jour"), which an English-shaped `days === 1 ? ... : ...` cannot express.
+function waitingLabel(t: Translate, tPlural: TranslatePlural, days: number): string {
     if (days === WAITING_UNKNOWN) {
-        return labels.waitingUnknown;
+        return t('board.waiting.unknown', 'unknown');
     }
 
     if (days === 0) {
-        return labels.waitingToday;
+        return t('board.waiting.today', 'today');
     }
 
     if (days < WAITING_WEEKS_FROM_DAYS) {
-        return labels.waitingDays(days);
+        return tPlural('board.waiting.days', days, '{{count}} day', '{{count}} days');
     }
 
-    return labels.waitingWeeks(Math.floor(days / DAYS_PER_WEEK));
+    const weeks = Math.floor(days / DAYS_PER_WEEK);
+    return tPlural('board.waiting.weeks', weeks, '{{count}} week', '{{count}} weeks');
 }
 
 function waitingColor(days: number): ChipColor {
@@ -178,38 +132,10 @@ function waitingColor(days: number): ChipColor {
 // Due date and priority (#66)
 // ---------------------------------------------------------------------------------------------
 
-// Shorter than CREATED_DATE_FORMAT below ("Aug 15, 2026", not "August 15, 2026"): this one has to
-// fit a 140px column that also carries the overdue chip and the iCal link, while the created date
-// sits on its own line in the flexible Task column. Same module-scope-singleton reason as that one.
-const DUE_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'short', day: 'numeric'});
-// The full stored instant, shown only as the cell's tooltip: the visible date is deliberately
-// day-precision, so a task due at 01:00 today reads "Aug 16, 2026" while already being overdue.
-// The tooltip is where that apparent contradiction is resolved, without widening the column.
-const DUE_DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {dateStyle: 'medium', timeStyle: 'short'});
-
-// Shared by all three formatters on this board (the two above and the created date further down):
-// same null/unparseable handling for every stored date, differing only in the format applied.
-function formatDate(format: Intl.DateTimeFormat, iso: string | null): string | null {
-    if (!iso) {
-        return null;
-    }
-
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) {
-        return null;
-    }
-
-    return format.format(date);
-}
-
-// The stored choicelist values (definitions.cnd: 'low', 'normal', 'high') as display labels. An
-// unrecognized value falls back to itself, capitalized, rather than being dropped -- the property
-// is a plain string server-side, so a task written by something other than this UI can hold one.
-const PRIORITY_LABELS: Record<string, string> = {
-    low: labels.priorityLow,
-    normal: labels.priorityNormal,
-    high: labels.priorityHigh
-};
+// All three date styles this board uses ('short' for the 140px Due column, 'dateTime' for its
+// tooltip, 'long' for the created-by line) live in ../lib/i18n.ts, formatted in the VIEWER's locale
+// rather than the hardcoded 'en-US' this file used before #62 -- see resolveLocale() there for
+// where that locale comes from on each of the two rendering paths.
 
 // Priority is carried by the WORD ("High"/"Normal"/"Low"), which is always rendered; the weight
 // only makes the extremes easier to pick out while scanning the column. Nothing here is
@@ -219,6 +145,10 @@ const PRIORITY_WEIGHT: Record<string, 'light' | 'default' | 'semiBold'> = {
     normal: 'default',
     high: 'semiBold'
 };
+
+// priorityLabel / stateLabel (the localized display of those two stored choicelist values) live in
+// task.shared.ts, beside capitalize() -- the task detail view renders the same two properties and
+// must not disagree with the board about how a given value reads.
 
 // ---------------------------------------------------------------------------------------------
 // Sorting: table columns <-> server sort arguments
@@ -309,11 +239,38 @@ type TaskBoardProps = {
 // All three are offered to every viewer, reviewer or not. "All tasks" is not a reviewer-only
 // switch: for a contributor it means the union they can already see (owned + created + candidate),
 // which is exactly the board they had before this control existed.
-const SCOPE_OPTIONS: Array<{scope: TaskScope; label: string}> = [
-    {scope: SCOPE_ASSIGNED_TO_ME, label: labels.scopeAssignedToMe},
-    {scope: SCOPE_CLAIMABLE, label: labels.scopeClaimable},
-    {scope: SCOPE_ALL, label: labels.scopeAll}
+//
+// Each scope carries its own empty-state sentence (#62): "No tasks to show" is accurate for the
+// unfiltered board but says the wrong thing under "Assigned to me", where the useful answer is
+// that nothing is waiting on YOU -- not that the board is empty.
+type ScopeOption = {
+    scope: TaskScope;
+    label: (t: Translate) => string;
+    empty: (t: Translate) => string;
+};
+
+const SCOPE_OPTIONS: ScopeOption[] = [
+    {
+        scope: SCOPE_ASSIGNED_TO_ME,
+        label: t => t('board.scopes.assignedToMe', 'Assigned to me'),
+        empty: t => t('board.empty.assignedToMe', 'No tasks are assigned to you.')
+    },
+    {
+        scope: SCOPE_CLAIMABLE,
+        label: t => t('board.scopes.claimable', 'Available to my group(s)'),
+        empty: t => t('board.empty.claimable', 'No tasks are currently available to your group(s).')
+    },
+    {
+        scope: SCOPE_ALL,
+        label: t => t('board.scopes.all', 'All tasks'),
+        empty: t => t('board.empty.all', 'No tasks to show.')
+    }
 ];
+
+// The tab / tabpanel pair the scope selector forms, so the two can reference each other by id
+// without either place inventing the string (see the Tab markup at the bottom of this file).
+const SCOPE_TAB_ID = (scope: TaskScope) => `task-board-scope-${scope}`;
+const SCOPE_PANEL_ID = 'task-board-panel';
 
 // Which outcome is the "decline" one, for ORDERING only (it goes first, matching the requested
 // layout, regardless of the order possibleOutcomes happens to declare them in). Matched against
@@ -321,17 +278,6 @@ const SCOPE_OPTIONS: Array<{scope: TaskScope; label: string}> = [
 // GqlTaskBoard#getPossibleOutcomeDetails), so an English pattern would only recognize it in
 // English, while the name is a workflow-definition constant that never changes with the locale.
 const REJECT_OUTCOME_PATTERN = /reject|refuse|deny|decline/i;
-
-// "2026-07-20T11:39:20.123Z" -> "July 20, 2026". Formatted client-side (rather than baking a fixed
-// locale into the server's ISO-8601 getCreatedDate()) so it can follow the viewer's own locale
-// later; hardcoded to 'en-US' for now, matching every other hardcoded English label in this file.
-// Module-scope singleton: a row is rendered per page row, so hoisting this out of the formatter
-// avoids allocating a new Intl.DateTimeFormat on every render.
-const CREATED_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'});
-
-function formatCreatedDate(iso: string | null): string | null {
-    return formatDate(CREATED_DATE_FORMAT, iso);
-}
 
 type MenuAction = {
     // Own identity, rather than reusing the mutation name as the React key: two actions in the
@@ -367,6 +313,7 @@ type TaskActionsProps = {
 // independently re-checks every one of these server-side and is the real security boundary; a
 // wrong guess here just surfaces as an error banner.
 function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
+    const {t} = useTasksTranslation();
     // The stored comment is the starting value of the box, and the yardstick for "did the reviewer
     // change anything": the workflow engine pre-fills it with the process summary, so it is
     // normally non-empty and must not be re-saved untouched on every decision.
@@ -420,17 +367,17 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         }));
 
     if (task.state === 'active' && isUnassigned) {
-        primaryActions.push({key: 'assign', label: labels.actionAssignToMe, mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
+        primaryActions.push({key: 'assign', label: t('common.actions.assignToMe', 'Assign to me'), mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
     } else if (canAct && task.state === 'active') {
         // Assigned, not started yet.
         primaryActions.push(
-            {key: 'unassign', label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {key: 'start', label: labels.actionStart, mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
+            {key: 'unassign', label: t('common.actions.unassign', 'Unassign'), mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {key: 'start', label: t('common.actions.start', 'Start'), mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
         );
     } else if (canAct && task.state === 'started') {
         primaryActions.push(
-            {key: 'unassign', label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {key: 'suspend', label: labels.actionSuspend, mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
+            {key: 'unassign', label: t('common.actions.unassign', 'Unassign'), mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {key: 'suspend', label: t('common.actions.suspend', 'Suspend'), mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
         );
         showPreview = true;
         // The task is already claimed and started here, so there is nothing for the fast path to
@@ -446,13 +393,13 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
             // owner-or-reviewer check, exactly like every other action here.
             decisionActions.push({
                 key: 'complete',
-                label: labels.actionComplete,
+                label: t('common.actions.complete', 'Complete'),
                 mutation: UPDATE_TASK_STATE_MUTATION,
                 variables: {id: task.id, state: 'finished'}
             });
         }
     } else if (canAct && task.state === 'suspended') {
-        primaryActions.push({key: 'resume', label: labels.actionResume, mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
+        primaryActions.push({key: 'resume', label: t('common.actions.resume', 'Resume'), mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
     }
 
     // Layered ON TOP of the active branches above rather than replacing either of them: the
@@ -464,14 +411,15 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         // is exactly what the reviewer needs to look at BEFORE deciding, so making the decision one
         // click away while leaving the preview three clicks away would collapse the wrong half.
         showPreview = true;
-        decisionActions.push(...decisionsFor(REVIEW_TASK_MUTATION, labels.oneClickHint));
+        decisionActions.push(...decisionsFor(REVIEW_TASK_MUTATION, t('board.actions.oneClickHint', 'Assigns this task to you and records your decision in one step')));
     }
 
     if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
-        return <Typography variant="caption" weight="light">{labels.noActions}</Typography>;
+        return <Typography variant="caption" weight="light">{t('common.noActions', 'No actions available')}</Typography>;
     }
 
     const taskData = task.simpleWorkflowTaskData;
+    const commentPlaceholder = t('board.comment.placeholder', 'Comment (optional)');
     // Only sent when it actually differs from what's stored -- an untouched (or never-opened) box
     // must not overwrite the node with the value it already holds.
     const commentUpdate = () => (taskData && comment !== storedComment ? {id: taskData.id, comment} : undefined);
@@ -495,7 +443,7 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
                 ))}
                 {showPreview && targetUrl && (
                     <Button
-                        label={labels.actionPreview}
+                        label={t('common.actions.preview', 'Preview')}
                         size="small"
                         variant="ghost"
                         isDisabled={isBusy}
@@ -511,13 +459,17 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
                             value={comment}
                             rows={3}
                             isDisabled={isBusy}
-                            placeholder={labels.commentPlaceholder}
-                            aria-label={labels.commentPlaceholder}
+                            placeholder={commentPlaceholder}
+                            // The placeholder is the only naming this box has on screen (it is
+                            // revealed in place of its own button, leaving no visible label beside
+                            // it), so it is repeated as the accessible name -- which survives the
+                            // box being filled in, at which point a placeholder stops being read.
+                            aria-label={commentPlaceholder}
                             onChange={event => setComment(event.target.value)}
                         />
                     ) : (
                         <Button
-                            label={labels.actionAddComment}
+                            label={t('board.actions.addComment', 'Add a comment')}
                             size="small"
                             variant="ghost"
                             isDisabled={isBusy}
@@ -549,6 +501,9 @@ type DueCellProps = {
     dueDate: string | null;
     state: string | null;
     icsUrl: string | null;
+    // Only used to name the iCal link for assistive technology -- see its aria-label below.
+    taskTitle: string | null;
+    locale: string;
 };
 
 // The Due column's cell (#66): the date, an "Overdue" chip once it has passed on a task that is
@@ -561,8 +516,9 @@ type DueCellProps = {
 //
 // Renders nothing at all when there is no due date: an empty cell says "no deadline" more
 // directly than a placeholder dash, and most workflow tasks have none.
-function DueCell({dueDate, state, icsUrl}: Readonly<DueCellProps>) {
-    const formatted = formatDate(DUE_DATE_FORMAT, dueDate);
+function DueCell({dueDate, state, icsUrl, taskTitle, locale}: Readonly<DueCellProps>) {
+    const {t} = useTasksTranslation();
+    const formatted = formatDate(locale, 'short', dueDate);
     if (!formatted) {
         // No due date, or one that can't be parsed -- the same two cases dueStatus() calls "none".
         return null;
@@ -571,18 +527,27 @@ function DueCell({dueDate, state, icsUrl}: Readonly<DueCellProps>) {
     const status = dueStatus(dueDate, state);
 
     return (
-        <div className="task-board__due-cell" title={formatDate(DUE_DATE_TIME_FORMAT, dueDate) ?? undefined}>
+        <div className="task-board__due-cell" title={formatDate(locale, 'dateTime', dueDate) ?? undefined}>
             <Typography variant="body">{formatted}</Typography>
-            {status === 'overdue' && <Chip label={labels.dueOverdue} color="danger"/>}
+            {/* The overdue signal is this WORD, on a chip that is additionally red -- the colour
+                repeats it, it never carries it alone (same rule the Waiting chip follows). */}
+            {status === 'overdue' && <Chip label={t('board.due.overdue', 'Overdue')} color="danger"/>}
             {icsUrl && (
                 <a
                     className="task-board__ics-link"
                     href={icsUrl}
-                    title={labels.icsHint}
+                    // "iCal" is as short as the 140px column allows, with the sentence-long version
+                    // as the tooltip. The accessible name additionally NAMES THE TASK: out of
+                    // context a screen reader otherwise announces a page full of identically
+                    // labelled "iCal" links with nothing to tell them apart.
+                    title={t('board.due.icsHint', 'Download this task as a calendar entry (.ics)')}
+                    aria-label={taskTitle
+                        ? t('board.due.icsLabel', 'Download "{{title}}" as a calendar entry (.ics)', {title: taskTitle})
+                        : t('board.due.icsHint', 'Download this task as a calendar entry (.ics)')}
                     target="_blank"
                     rel="noopener noreferrer"
                 >
-                    {labels.actionIcs}
+                    {t('board.due.ics', 'iCal')}
                 </a>
             )}
         </div>
@@ -592,6 +557,7 @@ function DueCell({dueDate, state, icsUrl}: Readonly<DueCellProps>) {
 type TaskCellProps = {
     task: TaskRow;
     showCandidates: boolean;
+    locale: string;
 };
 
 // The Task column's cell. Everything the card layout showed above the badges lives here as
@@ -599,9 +565,13 @@ type TaskCellProps = {
 // own description) and who created it when. Chosen over an expandable row because the summary is
 // a single line the reviewer scans while triaging -- hiding it behind a per-row toggle would make
 // the common case (read it) cost a click.
-function TaskCell({task, showCandidates}: Readonly<TaskCellProps>) {
+function TaskCell({task, showCandidates, locale}: Readonly<TaskCellProps>) {
+    const {t} = useTasksTranslation();
     const targetTitle = task.targetNode?.property?.value;
-    const createdDate = formatCreatedDate(task.createdDate);
+    // "2026-07-20T11:39:20.123Z" -> "July 20, 2026" / "20 juillet 2026". Formatted client-side
+    // rather than baking a locale into the server's ISO-8601 getCreatedDate(), which is what lets
+    // it follow the VIEWER's locale instead of the writer's.
+    const createdDate = formatDate(locale, 'long', task.createdDate);
     // The workflow-engine-derived summary (TaskBoardQueryExtensions#getWorkflowSummary) is only
     // available for a jnt:workflowTask whose process is still live; a plain jnt:task, or one
     // whose summary couldn't be resolved, falls back to its own free-text description instead.
@@ -611,7 +581,7 @@ function TaskCell({task, showCandidates}: Readonly<TaskCellProps>) {
         <div className="task-board__task-cell">
             <div className="task-board__task-title">
                 <Typography component="span" weight="semiBold" variant="body">
-                    {task.title ?? labels.untitledTask}
+                    {task.title ?? t('common.untitledTask', 'Untitled task')}
                 </Typography>
                 {targetTitle && task.targetNode?.url && (
                     <a
@@ -631,12 +601,17 @@ function TaskCell({task, showCandidates}: Readonly<TaskCellProps>) {
             )}
             {createdDate && (
                 <Typography component="p" variant="caption" weight="light" className="task-board__meta">
-                    {labels.createdBy(task.creator ?? labels.unknownCreator, createdDate)}
+                    {t('board.meta.createdBy', 'Created by: {{creator}}, on {{date}}', {
+                        creator: task.creator ?? t('common.unknown', 'Unknown'),
+                        date: createdDate
+                    })}
                 </Typography>
             )}
             {showCandidates && task.candidateDisplayNames.length > 0 && (
                 <Typography component="p" variant="caption" weight="light" className="task-board__meta">
-                    {labels.availableTo(task.candidateDisplayNames.join(', '))}
+                    {t('board.meta.availableTo', 'Available to: {{names}}', {
+                        names: task.candidateDisplayNames.join(', ')
+                    })}
                 </Typography>
             )}
         </div>
@@ -644,6 +619,11 @@ function TaskCell({task, showCandidates}: Readonly<TaskCellProps>) {
 }
 
 export default function TaskBoard({initialConnection, initialScope, graphqlEndpoint, currentUserKey, canReviewAll, language}: Readonly<TaskBoardProps>) {
+    // `language` doubles as the date-formatting locale on the SSR-island path: it is the page's own
+    // UI locale (RenderContext#getUILocale), and there is no i18next instance out there to read one
+    // from. Inside the app shell the shell's own i18next language wins over it -- see
+    // resolveLocale() in ../lib/i18n.ts.
+    const {t, tPlural, locale} = useTasksTranslation(language);
     const [currentPage, setCurrentPage] = useState(1);
     const [connection, setConnection] = useState(initialConnection);
     const [isLoading, setLoading] = useState(false);
@@ -695,11 +675,11 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             setConnection(data.taskBoard);
             setCurrentPage(page);
         } catch (e) {
-            setError(e instanceof Error ? e.message : labels.loadError);
+            setError(e instanceof Error ? e.message : t('common.error.load', 'Unable to load tasks.'));
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search, sortColumn, sortDirection, scope, showFinished, language]);
+    }, [graphqlEndpoint, itemsPerPage, search, sortColumn, sortDirection, scope, showFinished, language, t]);
 
     // itemsPerPage/search/sort/scope/showFinished all change what the *first* page even means, so
     // none of them can be applied by just re-fetching the current page -- every cached cursor is
@@ -758,11 +738,11 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             await callGraphQL(graphqlEndpoint, mutation, variables);
             await loadPage(currentPage);
         } catch (e) {
-            setError(e instanceof Error ? e.message : labels.actionError);
+            setError(e instanceof Error ? e.message : t('common.error.action', 'Unable to complete this action.'));
         } finally {
             setBusyTaskId(null);
         }
-    }, [graphqlEndpoint, currentPage, loadPage]);
+    }, [graphqlEndpoint, currentPage, loadPage, t]);
 
     const rows: TaskRow[] = useMemo(() => connection.edges.map(edge => ({
         ...edge.node,
@@ -773,69 +753,79 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     const columns: Array<DataTableColumn<TaskRow>> = useMemo(() => [
         {
             key: 'title',
-            label: labels.columnTask,
+            label: t('board.columns.task', 'Task'),
             isSortable: true,
             // Only shown in the claimable scope: everywhere else the row is either already
             // someone's or listed alongside tasks that aren't offered to anyone in particular,
             // and a "who else could take this" line would just be noise.
-            render: ({data}) => <TaskCell task={data} showCandidates={scope === SCOPE_CLAIMABLE}/>
+            render: ({data}) => <TaskCell task={data} showCandidates={scope === SCOPE_CLAIMABLE} locale={locale}/>
         },
         {
             key: 'dueDate',
-            label: labels.columnDue,
+            label: t('board.columns.due', 'Due'),
             // Wider than the other fixed columns: the cell stacks a date, an "Overdue" chip and
             // the iCal link, and 120px would break "Aug 15, 2026" across two lines.
             width: '140px',
             // Sorted server-side on the raw dueDate property, which is on its allow-list and so
             // stays on the query-level fast path (#64) -- see COLUMN_SORT_ARGUMENT.
             isSortable: true,
-            render: ({data}) => <DueCell dueDate={data.dueDate} state={data.state} icsUrl={data.icsUrl}/>
+            render: ({data}) => (
+                <DueCell
+                    dueDate={data.dueDate}
+                    state={data.state}
+                    icsUrl={data.icsUrl}
+                    taskTitle={data.title}
+                    locale={locale}
+                />
+            )
         },
         {
             key: 'priority',
-            label: labels.columnPriority,
+            label: t('board.columns.priority', 'Priority'),
             width: '120px',
             // Deliberately NOT sortable -- see COLUMN_SORT_ARGUMENT for why (the server has no
             // allow-list entry for it, and would silently fall back to its default ordering).
             render: ({data}) => (data.priority ? (
                 <Typography variant="body" weight={PRIORITY_WEIGHT[data.priority] ?? 'default'}>
-                    {PRIORITY_LABELS[data.priority] ?? capitalize(data.priority)}
+                    {priorityLabel(t, data.priority)}
                 </Typography>
             ) : null)
         },
         {
             key: 'waitingDays',
-            label: labels.columnWaiting,
+            label: t('board.columns.waiting', 'Waiting'),
             width: '120px',
             isSortable: true,
             render: ({data}) => (
                 <Chip
-                    label={waitingLabel(data.waitingDays)}
+                    label={waitingLabel(t, tPlural, data.waitingDays)}
                     color={waitingColor(data.waitingDays)}
                 />
             )
         },
         {
             key: 'owner',
-            label: labels.columnOwner,
+            label: t('board.columns.owner', 'Owner'),
             width: '160px',
             isSortable: true,
             render: ({data}) => (
-                <Typography variant="body">{data.assigneeDisplayName ?? labels.unassigned}</Typography>
+                <Typography variant="body">
+                    {data.assigneeDisplayName ?? t('common.unassigned', 'Unassigned')}
+                </Typography>
             )
         },
         {
             key: 'state',
-            label: labels.columnState,
+            label: t('board.columns.state', 'State'),
             width: '120px',
             isSortable: true,
             render: ({data}) => (
-                <Chip label={capitalize(data.state)} color={(data.state && STATE_CHIP_COLOR[data.state]) || 'default'}/>
+                <Chip label={stateLabel(t, data.state)} color={(data.state && STATE_CHIP_COLOR[data.state]) || 'default'}/>
             )
         },
         {
             key: 'actions',
-            label: labels.columnActions,
+            label: t('board.columns.actions', 'Actions'),
             width: '280px',
             render: ({data}) => (
                 <TaskActions
@@ -847,13 +837,20 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                 />
             )
         }
-    ], [scope, currentUserKey, canReviewAll, busyTaskId, handleAction]);
+    ], [scope, currentUserKey, canReviewAll, busyTaskId, handleAction, t, tPlural, locale]);
+
+    const activeScope = SCOPE_OPTIONS.find(option => option.scope === scope) ?? SCOPE_OPTIONS[SCOPE_OPTIONS.length - 1];
+    const searchLabel = t('board.search.label', 'Search:');
 
     let boardContent;
     if (isLoading) {
         boardContent = <Loader/>;
     } else if (rows.length === 0) {
-        boardContent = <EmptyData message={labels.emptyBoard}/>;
+        // role="status": this replaces the table in place when a tab, the search box or the
+        // "Show finished" toggle changes the listing, so a screen-reader user who never moves
+        // focus here still hears that the result is empty. Polite, not assertive -- it is the
+        // outcome of what they just did, not an interruption.
+        boardContent = <EmptyData role="status" message={activeScope.empty(t)}/>;
     } else {
         boardContent = (
             <DataTable
@@ -878,25 +875,39 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     return (
         <ContentLayout
             paper
-            header={(
-                <div style={{backgroundColor: 'white'}}>
-                    <Header title={labels.boardTitle}/>
-                </div>
-            )}
+            // No wrapper, and above all no background of its own: Moonstone's Header already paints
+            // itself with the --moon-background-selector token, and ContentLayout's own <main>
+            // carries --color-gray_light behind it. The hardcoded `backgroundColor: 'white'` that
+            // used to wrap this was a third, un-tokenized layer on top of those two, and the only
+            // literal colour left in this component -- which is exactly what broke under the dark
+            // theme (white strip, dark title on it). Every colour on this board is now a token.
+            header={<Header title={t('board.title', 'Tasks')}/>}
             content={(
                 <div className="task-board__content">
                     <div className="task-board__scopes">
-                        <Tab>
+                        {/* Moonstone renders Tab as role="tablist" and each TabItem as a
+                            <button role="tab" aria-selected> with arrow-key navigation between
+                            siblings, so the selector is already operable from the keyboard. What it
+                            does not do is name the tablist or tie the tabs to what they control --
+                            both supplied here (Moonstone spreads unknown props straight onto the
+                            rendered element). */}
+                        <Tab aria-label={t('board.scopes.label', 'Task scope')}>
                             {SCOPE_OPTIONS.map(option => (
                                 <TabItem
                                     key={option.scope}
-                                    label={option.label}
+                                    id={SCOPE_TAB_ID(option.scope)}
+                                    aria-controls={SCOPE_PANEL_ID}
+                                    label={option.label(t)}
                                     isSelected={scope === option.scope}
                                     onClick={() => setScope(option.scope)}
                                 />
                             ))}
                         </Tab>
                         <div className="task-board__show-finished">
+                            {/* Moonstone's Switch spreads its rest props onto the underlying
+                                <input type="checkbox">, so this id is the input's own -- which is
+                                what makes the <label for> below a real accessible name for the
+                                control rather than a caption sitting next to it. */}
                             <Switch
                                 id="task-board-show-finished"
                                 checked={showFinished}
@@ -904,29 +915,48 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                                 onChange={() => setShowFinished(current => !current)}
                             />
                             <label htmlFor="task-board-show-finished">
-                                <Typography component="span" variant="body">{labels.showFinished}</Typography>
+                                <Typography component="span" variant="body">
+                                    {t('board.showFinished', 'Show finished')}
+                                </Typography>
                             </label>
                         </div>
                     </div>
                     <div className="task-board__toolbar">
-                        <Typography variant="caption" weight="light">{labels.taskCount(connection.pageInfo.totalCount)}</Typography>
+                        <Typography variant="caption" weight="light">
+                            {tPlural('board.taskCount', connection.pageInfo.totalCount, '{{count}} task', '{{count}} tasks')}
+                        </Typography>
                         <div className="task-board__search">
-                            <Typography variant="body" weight="semiBold">{labels.searchLabel}</Typography>
+                            <Typography id="task-board-search-label" variant="body" weight="semiBold">{searchLabel}</Typography>
                             <Input
                                 className="task-board__search-input"
                                 icon={<Search/>}
-                                placeholder={labels.searchPlaceholder}
+                                placeholder={t('board.search.placeholder', 'Search tasks...')}
                                 value={searchInput}
+                                // The visible "Search:" text is a Typography span, not a <label>,
+                                // so it can't be associated with for/htmlFor -- referenced by id
+                                // instead, which gives the input the same accessible name without
+                                // changing the layout.
+                                aria-labelledby="task-board-search-label"
                                 onChange={e => setSearchInput(e.target.value)}
                             />
                         </div>
                     </div>
                     {error && (
-                        <Banner title={labels.errorTitle} variant="danger">
+                        // role="alert" (an assertive live region): the banner appears in response to
+                        // an action the user just took and states why it failed, which is the one
+                        // thing on this board worth interrupting for.
+                        <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">
                             {error}
                         </Banner>
                     )}
-                    {boardContent}
+                    <div
+                        id={SCOPE_PANEL_ID}
+                        className="task-board__panel"
+                        role="tabpanel"
+                        aria-labelledby={SCOPE_TAB_ID(scope)}
+                    >
+                        {boardContent}
+                    </div>
                 </div>
             )}
         />

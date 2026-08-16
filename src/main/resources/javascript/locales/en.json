@@ -1,5 +1,133 @@
 {
   "jnt_task": {
     "myTasks": "My Tasks"
+  },
+  "common": {
+    "unknown": "Unknown",
+    "unassigned": "Unassigned",
+    "untitledTask": "Untitled task",
+    "noActions": "No actions available",
+    "error": {
+      "title": "Something went wrong",
+      "load": "Unable to load tasks.",
+      "action": "Unable to complete this action."
+    },
+    "priority": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High"
+    },
+    "state": {
+      "active": "Active",
+      "started": "Started",
+      "suspended": "Suspended",
+      "finished": "Finished",
+      "cancelled": "Cancelled"
+    },
+    "actions": {
+      "assignToMe": "Assign to me",
+      "unassign": "Unassign",
+      "start": "Start",
+      "suspend": "Suspend",
+      "resume": "Resume",
+      "preview": "Preview",
+      "complete": "Complete",
+      "continue": "Continue",
+      "cancel": "Cancel",
+      "save": "Save",
+      "submit": "Submit"
+    }
+  },
+  "board": {
+    "title": "Tasks",
+    "taskCount": "{{count}} task",
+    "taskCount_plural": "{{count}} tasks",
+    "columns": {
+      "task": "Task",
+      "due": "Due",
+      "priority": "Priority",
+      "waiting": "Waiting",
+      "owner": "Owner",
+      "state": "State",
+      "actions": "Actions"
+    },
+    "scopes": {
+      "label": "Task scope",
+      "assignedToMe": "Assigned to me",
+      "claimable": "Available to my group(s)",
+      "all": "All tasks"
+    },
+    "showFinished": "Show finished",
+    "search": {
+      "label": "Search:",
+      "placeholder": "Search tasks..."
+    },
+    "empty": {
+      "assignedToMe": "No tasks are assigned to you.",
+      "claimable": "No tasks are currently available to your group(s).",
+      "all": "No tasks to show."
+    },
+    "waiting": {
+      "today": "today",
+      "unknown": "unknown",
+      "days": "{{count}} day",
+      "days_plural": "{{count}} days",
+      "weeks": "{{count}} week",
+      "weeks_plural": "{{count}} weeks"
+    },
+    "due": {
+      "overdue": "Overdue",
+      "ics": "iCal",
+      "icsHint": "Download this task as a calendar entry (.ics)",
+      "icsLabel": "Download \"{{title}}\" as a calendar entry (.ics)"
+    },
+    "actions": {
+      "addComment": "Add a comment",
+      "oneClickHint": "Assigns this task to you and records your decision in one step"
+    },
+    "comment": {
+      "placeholder": "Comment (optional)"
+    },
+    "meta": {
+      "createdBy": "Created by: {{creator}}, on {{date}}",
+      "availableTo": "Available to: {{names}}"
+    }
+  },
+  "detail": {
+    "fields": {
+      "description": "Description",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "state": "State"
+    },
+    "error": {
+      "update": "Unable to update this task."
+    }
+  },
+  "list": {
+    "completed": "Completed",
+    "actions": {
+      "markCompleted": "Completed",
+      "refuse": "Refuse",
+      "showMenu": "Show task actions",
+      "hideMenu": "Hide task actions"
+    }
+  },
+  "create": {
+    "fields": {
+      "title": "Title",
+      "description": "Description",
+      "assignee": "Assignee",
+      "dueDate": "Due date"
+    },
+    "error": {
+      "create": "Unable to create this task."
+    }
+  },
+  "taskData": {
+    "commentLabel": "Workflow task comment",
+    "error": {
+      "save": "Unable to save this title."
+    }
   }
 }

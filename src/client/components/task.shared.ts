@@ -4,14 +4,38 @@
  * taskBoard.shared.ts for why this has no @jahia/javascript-modules-library import.
  */
 
-// Shared with TaskBoard.client.tsx -- both display a task's state/priority with a capitalized
-// first letter, falling back to "Unknown" for a null/empty value.
-export function capitalize(value: string | null): string {
-    if (!value) {
-        return 'Unknown';
+// Type-only, so nothing from the i18n bridge (a browser-global reader) is pulled into the server
+// bundle that also imports this file for TASK_QUERY.
+import type {Translate} from '../lib/i18n';
+
+// Last-resort presentation of a raw stored value. Used as the DEFAULT of the two lookups below
+// rather than on its own: it exists for a value no locale file has a key for.
+export function capitalize(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+// The two enum-valued properties every task view renders (definitions.cnd declares
+// 'low'/'normal'/'high' and 'active'/'started'/'suspended'/'finished'/'cancelled'), as localized
+// labels. Shared by TaskBoard.client.tsx and TaskDetail.client.tsx so the same stored value cannot
+// read one way on the board and another on the detail view.
+//
+// Each builds its key from the stored value and hands capitalize() in as the default, so a value
+// written by something other than this UI -- both properties are plain strings server-side -- still
+// renders as itself rather than as a raw translation key.
+export function priorityLabel(t: Translate, priority: string | null): string {
+    if (!priority) {
+        return t('common.unknown', 'Unknown');
     }
 
-    return value.charAt(0).toUpperCase() + value.slice(1);
+    return t(`common.priority.${priority}`, capitalize(priority));
+}
+
+export function stateLabel(t: Translate, state: string | null): string {
+    if (!state) {
+        return t('common.unknown', 'Unknown');
+    }
+
+    return t(`common.state.${state}`, capitalize(state));
 }
 
 export const TASK_QUERY = /* GraphQL */ `
