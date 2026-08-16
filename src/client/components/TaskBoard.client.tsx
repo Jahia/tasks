@@ -1,5 +1,6 @@
+import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Banner, Button, Chip, DataTable, EmptyData, Header, Input, Loader, Search, Switch, Tab, TabItem, Textarea, Typography} from '@jahia/moonstone';
+import {AddComment, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, MoreVert, OpenInNew, Paper, Search, Separator, Switch, Tab, TabItem, Textarea, Typography, Visibility} from '@jahia/moonstone';
 // Type-only, so nothing is imported at runtime from this subpath: the DataTable *component* comes
 // from the package root above (moonstone re-exports it there), but its column/sort types are only
 // published under the './DataTable' export condition.
@@ -300,26 +301,48 @@ type TaskActionRequest = {
     taskDataComment?: {id: string; comment: string};
 };
 
-type TaskActionsProps = {
+// What a row's "Preview" action asks the board to show in its side panel: everything the panel
+// renders, resolved once by the row that opened it. The panel never looks the task up again, which
+// is what lets it keep showing what it was opened on while the board reloads underneath it.
+type PreviewTarget = {
+    // The target page's own title -- what the panel is actually showing.
+    title: string;
+    // The task the preview was opened from, kept beside the page title so the panel still says
+    // which piece of work this content is being looked at for.
+    taskTitle: string;
+    url: string;
+};
+
+type TaskRowActionsProps = {
     task: TaskBoardNode;
     currentUserKey: string;
     canReviewAll: boolean;
     isBusy: boolean;
+    isCommentOpen: boolean;
+    commentDrafts: MutableRefObject<Map<string, string>>;
     onAction: (request: TaskActionRequest) => void;
+    onOpenComment: (taskId: string) => void;
+    onPreview: (target: PreviewTarget) => void;
 };
 
-// Same state/ownership rules as before this component's redesign -- just rendered as visible,
-// always-on-screen buttons now instead of a 3-dot menu. TaskBoardMutationExtensions
-// independently re-checks every one of these server-side and is the real security boundary; a
-// wrong guess here just surfaces as an error banner.
-function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
+// Same state/ownership rules as before, and the same server-side truth: what changed here is only
+// how those actions are PRESENTED. This follows jcontent's row pattern -- every per-row action of
+// its content table lives behind one <MoreVert/> button (JContent.actions.jsx registers them all
+// under a single 'contentItemActionsMenu'), and the cell holding it is revealed on row hover
+// (ContentTable.scss: `tr:hover .cellActions`). Rebuilt on plain Moonstone Menu/MenuItem rather
+// than reused: jcontent is an application, not a library this module could import from, and its
+// menu goes through its own action registry and redux store.
+//
+// TaskBoardMutationExtensions independently re-checks every one of these server-side and is the
+// real security boundary; a wrong guess here just surfaces as an error banner.
+function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOpen, commentDrafts, onAction, onOpenComment, onPreview}: Readonly<TaskRowActionsProps>) {
     const {t} = useTasksTranslation();
+    const [isMenuOpen, setMenuOpen] = useState(false);
+    const anchorRef = useRef<HTMLDivElement>(null);
     // The stored comment is the starting value of the box, and the yardstick for "did the reviewer
     // change anything": the workflow engine pre-fills it with the process summary, so it is
     // normally non-empty and must not be re-saved untouched on every decision.
     const storedComment = task.simpleWorkflowTaskData?.comment ?? '';
-    const [comment, setComment] = useState(storedComment);
-    const [isCommentOpen, setCommentOpen] = useState(false);
     const isMine = task.owner === currentUserKey;
     const canAct = isMine || canReviewAll;
     const targetUrl = task.targetNode?.url;
@@ -330,10 +353,9 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     // way from Assigned into Active/In-Progress.
     const isUnassigned = !task.owner;
     const primaryActions: MenuAction[] = [];
-    // Kept visually separated (own row below) from primaryActions: these are workflow publication
-    // decisions, not routine task-management actions.
+    // Kept visually separated (below a Separator in the menu) from primaryActions: these are
+    // workflow publication decisions, not routine task-management actions.
     const decisionActions: MenuAction[] = [];
-    let showPreview = false;
 
     // Whether this row qualifies for the one-click fast path (#67): an active task, not held by
     // anyone else, that this viewer may take, and that has an actual decision to record.
@@ -379,7 +401,6 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
             {key: 'unassign', label: t('common.actions.unassign', 'Unassign'), mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
             {key: 'suspend', label: t('common.actions.suspend', 'Suspend'), mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
         );
-        showPreview = true;
         // The task is already claimed and started here, so there is nothing for the fast path to
         // collapse: this is the plain completion.
         decisionActions.push(...decisionsFor(COMPLETE_TASK_MUTATION));
@@ -407,93 +428,301 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     // on one already claimed), so a reviewer who wants to claim now and decide later still can.
     // This only adds the decision that used to require walking the whole ladder first.
     if (canReviewInOneClick) {
-        // Review-before-decide, previously reachable only after Assign + Start: the target content
-        // is exactly what the reviewer needs to look at BEFORE deciding, so making the decision one
-        // click away while leaving the preview three clicks away would collapse the wrong half.
-        showPreview = true;
         decisionActions.push(...decisionsFor(REVIEW_TASK_MUTATION, t('board.actions.oneClickHint', 'Assigns this task to you and records your decision in one step')));
     }
 
-    if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
-        return <Typography variant="caption" weight="light">{t('common.noActions', 'No actions available')}</Typography>;
-    }
-
     const taskData = task.simpleWorkflowTaskData;
-    const commentPlaceholder = t('board.comment.placeholder', 'Comment (optional)');
     // Only sent when it actually differs from what's stored -- an untouched (or never-opened) box
-    // must not overwrite the node with the value it already holds.
-    const commentUpdate = () => (taskData && comment !== storedComment ? {id: taskData.id, comment} : undefined);
+    // must not overwrite the node with the value it already holds. Read out of the board's draft
+    // map at CLICK time rather than from a render-time snapshot: the box itself lives in another
+    // cell of the same row (see TaskCommentEditor) and its keystrokes deliberately do not
+    // re-render this menu. `undefined` means "never typed in", which is not the same as "typed the
+    // stored value back in" -- both end up sending nothing, but only the first is the common case.
+    const commentUpdate = () => {
+        if (!taskData) {
+            return undefined;
+        }
+
+        const draft = commentDrafts.current.get(task.id);
+        return draft !== undefined && draft !== storedComment ? {id: taskData.id, comment: draft} : undefined;
+    };
+
     const runDecision = (action: MenuAction) => onAction({
         mutation: action.mutation,
         variables: action.variables,
         taskDataComment: commentUpdate()
     });
 
+    // Every menu item closes the menu before doing anything: the action either re-fetches the page
+    // underneath it (which would leave a menu floating over rows that no longer match it) or opens
+    // something else that now owns the reviewer's attention.
+    const closeThen = (run: () => void) => () => {
+        setMenuOpen(false);
+        run();
+    };
+
+    // Menu requires each top-level child to be a single MenuItem element -- its internal
+    // auto-search-threshold check does `children[0].props[...]`, which throws if children[0] is
+    // itself an array (the same trap TaskListItem.client.tsx documents at length). One flat array
+    // built up front, rather than a ternary/&& mix of JSX expressions as Menu's children, keeps
+    // every child a plain element.
+    //
+    // Keys are namespaced per group: an outcome's name is workflow-defined and could in principle
+    // collide with one of the fixed primary-action keys, and the two groups are siblings now.
+    const menuItems: ReactElement[] = [];
+
+    primaryActions.forEach(action => {
+        menuItems.push(
+            <MenuItem
+                key={`primary-${action.key}`}
+                label={action.label}
+                isDisabled={isBusy}
+                onClick={closeThen(() => onAction({mutation: action.mutation, variables: action.variables}))}
+            />
+        );
+    });
+
+    // Same condition the "Add a comment" button had: only a task carrying a jnt:simpleWorkflow
+    // child has anywhere to store a comment, and only a decision gives it a purpose. Dropped once
+    // the editor is open, since the item's whole job is to reveal it.
+    if (taskData && decisionActions.length > 0 && !isCommentOpen) {
+        menuItems.push(
+            <MenuItem
+                key="comment"
+                label={t('board.actions.addComment', 'Add a comment')}
+                iconStart={<AddComment/>}
+                isDisabled={isBusy}
+                onClick={closeThen(() => onOpenComment(task.id))}
+            />
+        );
+    }
+
+    // Both preview actions are offered on any row whose target still resolves to a renderable URL,
+    // rather than only in the states that used to carry the single Preview button (started, or
+    // one-click-eligible). Preview is a read-only look at the content and is exactly what a
+    // reviewer needs BEFORE deciding anything, so gating it on a state they first have to claim
+    // their way into put it behind the very clicks it exists to save.
+    if (targetUrl) {
+        const targetTitle = task.targetNode?.property?.value;
+        const taskTitle = task.title ?? t('common.untitledTask', 'Untitled task');
+        menuItems.push(
+            <MenuItem
+                key="preview"
+                label={t('common.actions.preview', 'Preview')}
+                iconStart={<Visibility/>}
+                onClick={closeThen(() => onPreview({
+                    title: targetTitle ?? taskTitle,
+                    taskTitle,
+                    url: targetUrl
+                }))}
+            />,
+            <MenuItem
+                key="preview-new-tab"
+                label={t('board.actions.previewInNewTab', 'Preview in a new tab')}
+                iconStart={<OpenInNew/>}
+                onClick={closeThen(() => window.open(targetUrl, '_blank', 'noopener,noreferrer'))}
+            />
+        );
+    }
+
+    if (decisionActions.length > 0) {
+        if (menuItems.length > 0) {
+            menuItems.push(<Separator key="decisions-separator" variant="horizontal" spacing="small"/>);
+        }
+
+        decisionActions.forEach(action => {
+            menuItems.push(
+                <MenuItem
+                    key={`decision-${action.key}`}
+                    label={action.label}
+                    // The one-click fast path's explanatory hint (#67), which used to be the
+                    // button's tooltip and is now the menu item's -- MenuItem spreads unknown
+                    // props onto its <li>.
+                    title={action.hint}
+                    isDisabled={isBusy}
+                    onClick={closeThen(() => runDecision(action))}
+                />
+            );
+        });
+    }
+
+    const hasActions = menuItems.length > 0;
+    // A row with nothing to offer still gets a (disabled) kebab rather than an empty cell, so the
+    // Actions column stays visually regular and the answer to "why is there no menu here?" is on
+    // the control itself instead of being absent.
+    const menuLabel = hasActions
+        ? t('board.actions.showMenu', 'Show task actions')
+        : t('common.noActions', 'No actions available');
+
     return (
-        <div className="task-board__actions">
-            <div className="task-board__actions-row">
-                {primaryActions.map(action => (
-                    <Button
-                        key={action.key}
-                        label={action.label}
-                        size="small"
-                        isDisabled={isBusy}
-                        onClick={() => onAction({mutation: action.mutation, variables: action.variables})}
-                    />
-                ))}
-                {showPreview && targetUrl && (
-                    <Button
-                        label={t('common.actions.preview', 'Preview')}
-                        size="small"
-                        variant="ghost"
-                        isDisabled={isBusy}
-                        onClick={() => window.open(targetUrl, '_blank', 'noopener,noreferrer')}
-                    />
-                )}
-            </div>
-            {taskData && decisionActions.length > 0 && (
-                <div className="task-board__actions-row">
-                    {isCommentOpen ? (
-                        <Textarea
-                            className="task-board__comment"
-                            value={comment}
-                            rows={3}
-                            isDisabled={isBusy}
-                            placeholder={commentPlaceholder}
-                            // The placeholder is the only naming this box has on screen (it is
-                            // revealed in place of its own button, leaving no visible label beside
-                            // it), so it is repeated as the accessible name -- which survives the
-                            // box being filled in, at which point a placeholder stops being read.
-                            aria-label={commentPlaceholder}
-                            onChange={event => setComment(event.target.value)}
-                        />
-                    ) : (
-                        <Button
-                            label={t('board.actions.addComment', 'Add a comment')}
-                            size="small"
-                            variant="ghost"
-                            isDisabled={isBusy}
-                            onClick={() => setCommentOpen(true)}
-                        />
-                    )}
-                </div>
-            )}
-            {decisionActions.length > 0 && (
-                <div className="task-board__actions-row task-board__actions-row--decisions">
-                    {decisionActions.map(action => (
-                        <Button
-                            key={action.key}
-                            label={action.label}
-                            title={action.hint}
-                            size="small"
-                            color="accent"
-                            isDisabled={isBusy}
-                            onClick={() => runDecision(action)}
-                        />
-                    ))}
-                </div>
+        <div
+            ref={anchorRef}
+            className={`task-board__row-actions${isMenuOpen ? ' task-board__row-actions--open' : ''}`}
+            // Escape closes the menu: Moonstone's Menu dismisses itself on its own click-away
+            // overlay only, and never on a key. The handler sits on this wrapper because the menu
+            // is rendered as a DOM child of it (it is merely position:fixed), so a keydown on the
+            // button or on any menu item bubbles through here. Stopped from going further, so one
+            // Escape doesn't also close the preview panel listening on the document.
+            onKeyDown={event => {
+                if (event.key === 'Escape' && isMenuOpen) {
+                    event.stopPropagation();
+                    setMenuOpen(false);
+                }
+            }}
+        >
+            <Button
+                icon={<MoreVert/>}
+                variant="ghost"
+                isDisabled={isBusy || !hasActions}
+                aria-haspopup="menu"
+                aria-expanded={isMenuOpen}
+                // The button has no label of its own (it is an icon), so both the accessible name
+                // and the pointer tooltip have to be supplied.
+                aria-label={menuLabel}
+                title={menuLabel}
+                onClick={() => setMenuOpen(open => !open)}
+            />
+            {/* Mounted only while open, unlike the always-rendered Menu in TaskListItem: Moonstone
+                hides a closed menu with opacity+pointer-events, which leaves its items in the tab
+                order -- one page of this board would otherwise bury 25 invisible menus' worth of
+                tab stops between the table and the pagination. */}
+            {isMenuOpen && (
+                <Menu
+                    isDisplayed
+                    // Never: seven items is reachable in one look, and Moonstone would otherwise
+                    // auto-add a search box past its own 7-child threshold.
+                    hasSearch={false}
+                    anchorEl={anchorRef as MutableRefObject<HTMLDivElement>}
+                    anchorElOrigin={{vertical: 'bottom', horizontal: 'right'}}
+                    transformElOrigin={{vertical: 'top', horizontal: 'right'}}
+                    onClose={() => setMenuOpen(false)}
+                >
+                    {menuItems}
+                </Menu>
             )}
         </div>
+    );
+}
+
+type TaskCommentEditorProps = {
+    taskId: string;
+    initialValue: string;
+    drafts: MutableRefObject<Map<string, string>>;
+    isDisabled: boolean;
+};
+
+// The optional decision comment, opened from the row's own action menu and rendered inline in the
+// Task cell -- not in the Actions cell it used to share with the buttons, which is now 72px wide
+// and cannot hold a text box at all.
+//
+// The text is local state here and MIRRORED into the board-level `drafts` map, which is a ref
+// rather than state on purpose: the value is read exactly once, by the decision the row's menu
+// runs (see commentUpdate above), and nothing else on the board depends on it. Holding it in board
+// state instead would re-render every row of the table on every keystroke.
+function TaskCommentEditor({taskId, initialValue, drafts, isDisabled}: Readonly<TaskCommentEditorProps>) {
+    const {t} = useTasksTranslation();
+    // Seeded from the draft map first, so a re-render of the table (every action triggers one)
+    // brings back what the reviewer had already typed rather than the stored value.
+    const [value, setValue] = useState(() => drafts.current.get(taskId) ?? initialValue);
+    const placeholder = t('board.comment.placeholder', 'Comment (optional)');
+
+    return (
+        <Textarea
+            // Opened by an explicit menu choice, so the cursor belongs in it: without this the
+            // reviewer's next keystroke goes nowhere, the menu having just closed.
+            autoFocus
+            className="task-board__comment"
+            value={value}
+            rows={3}
+            isDisabled={isDisabled}
+            placeholder={placeholder}
+            // The placeholder is the only naming this box has on screen (it is revealed on its own,
+            // with no visible label beside it), so it is repeated as the accessible name -- which
+            // survives the box being filled in, at which point a placeholder stops being read.
+            aria-label={placeholder}
+            onChange={event => {
+                setValue(event.target.value);
+                drafts.current.set(taskId, event.target.value);
+            }}
+        />
+    );
+}
+
+type TaskPreviewPanelProps = {
+    target: PreviewTarget;
+    onClose: () => void;
+};
+
+// The "Preview" side panel, mirroring jcontent's: its previewAction selects the node into a side
+// panel shown beside the content list rather than navigating away from it. None of that is
+// importable (it runs through jcontent's redux store, its renderedContent GraphQL query and its
+// own viewer registry), so this is the same UX shape rebuilt small: the target page, at the very
+// URL the "Preview in a new tab" action opens, in an iframe.
+//
+// Moonstone 2.20.3 does export a Drawer, and it is NOT what this needs: it is layout-only -- a
+// Paper with height:-webkit-fill-available, meant to be a column inside a flex layout -- with no
+// positioning, no animation and no dismissal of its own, and it does not forward Paper's
+// hasPadding, which a full-bleed iframe wants. Built on Paper directly instead, which is what
+// Drawer is anyway, so the panel still carries the dashboard's own surface tokens.
+function TaskPreviewPanel({target, onClose}: Readonly<TaskPreviewPanelProps>) {
+    const {t} = useTasksTranslation();
+    const label = t('board.preview.label', 'Content preview');
+    const closeLabel = t('board.preview.close', 'Close preview');
+
+    // Listened for on the document, not on the panel: this panel is deliberately not modal (the
+    // board behind it stays scrollable and clickable, which is the point of previewing beside the
+    // worklist), so by the time the reviewer wants it gone their focus is usually back in the
+    // table. A row menu's own Escape handler stops the event before it reaches here, so one
+    // Escape never closes both.
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onClose();
+            }
+        };
+
+        document.addEventListener('keydown', handleKeyDown);
+        return () => document.removeEventListener('keydown', handleKeyDown);
+    }, [onClose]);
+
+    return (
+        <Paper
+            hasPadding={false}
+            className="task-board__preview"
+            role="dialog"
+            // Deliberately no aria-modal: nothing behind this panel is inert, and claiming
+            // otherwise would tell a screen reader the rest of the board is unavailable.
+            aria-label={label}
+        >
+            <div className="task-board__preview-header">
+                <div className="task-board__preview-titles">
+                    <Typography component="h2" variant="subheading" weight="semiBold">{target.title}</Typography>
+                    <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                        {t('board.preview.task', 'Task: {{title}}', {title: target.taskTitle})}
+                    </Typography>
+                </div>
+                <Button
+                    // The panel opens from a menu item that unmounts with the menu, so focus would
+                    // otherwise be left on a detached node: it is moved onto the one control that
+                    // dismisses the thing that just appeared.
+                    autoFocus
+                    icon={<Close/>}
+                    variant="ghost"
+                    aria-label={closeLabel}
+                    title={closeLabel}
+                    onClick={onClose}
+                />
+            </div>
+            {/* Keyed by URL so swapping to another row's preview mounts a fresh frame instead of
+                navigating this one -- which would otherwise build up a back-history inside the
+                panel that nothing exposes a way to walk. */}
+            <iframe
+                key={target.url}
+                className="task-board__preview-frame"
+                src={target.url}
+                title={label}
+            />
+        </Paper>
     );
 }
 
@@ -537,6 +766,9 @@ type TaskCellProps = {
     task: TaskRow;
     showCandidates: boolean;
     locale: string;
+    isCommentOpen: boolean;
+    isBusy: boolean;
+    commentDrafts: MutableRefObject<Map<string, string>>;
 };
 
 // The Task column's cell. Everything the card layout showed above the badges lives here as
@@ -544,7 +776,7 @@ type TaskCellProps = {
 // own description) and who created it when. Chosen over an expandable row because the summary is
 // a single line the reviewer scans while triaging -- hiding it behind a per-row toggle would make
 // the common case (read it) cost a click.
-function TaskCell({task, showCandidates, locale}: Readonly<TaskCellProps>) {
+function TaskCell({task, showCandidates, locale, isCommentOpen, isBusy, commentDrafts}: Readonly<TaskCellProps>) {
     const {t} = useTasksTranslation();
     const targetTitle = task.targetNode?.property?.value;
     // "2026-07-20T11:39:20.123Z" -> "July 20, 2026" / "20 juillet 2026". Formatted client-side
@@ -593,6 +825,16 @@ function TaskCell({task, showCandidates, locale}: Readonly<TaskCellProps>) {
                     })}
                 </Typography>
             )}
+            {/* Opened from the row's action menu, two columns to the right -- see
+                TaskCommentEditor for why the box ended up in this cell rather than that one. */}
+            {isCommentOpen && (
+                <TaskCommentEditor
+                    taskId={task.id}
+                    initialValue={task.simpleWorkflowTaskData?.comment ?? ''}
+                    drafts={commentDrafts}
+                    isDisabled={isBusy}
+                />
+            )}
         </div>
     );
 }
@@ -621,6 +863,18 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     // the sorted column header renders, and toSortArgument() derives the query arguments from it.
     const [sortColumn, setSortColumn] = useState<SortableColumn>(DEFAULT_SORT_COLUMN);
     const [sortDirection, setSortDirection] = useState<SortDirection>(DEFAULT_SORT_DIRECTION);
+    // The row whose inline comment editor is open, if any -- one at a time, since it is opened from
+    // that row's own action menu. Owned by the board rather than by the row's actions because the
+    // two halves now sit in different DataTable columns: the menu item that opens it is in the
+    // Actions cell, the box itself is in the Task cell (see TaskCommentEditor).
+    const [openCommentTaskId, setOpenCommentTaskId] = useState<string | null>(null);
+    // Draft comment text per task id. A ref, not state: the box holds its own value locally, and
+    // the only other reader is the decision a row's menu runs, which reads it at click time -- so
+    // nothing here has to re-render when a key is pressed.
+    const commentDrafts = useRef<Map<string, string>>(new Map());
+    // The single preview panel this board owns: picking "Preview" on another row swaps what it
+    // shows rather than stacking a second panel on top.
+    const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
     // Relay-style cursor pagination only supports moving forward one page at a
     // time; this caches the cursor needed to fetch each page once it has been
     // reached, so navigating back to an already-visited page doesn't require
@@ -715,6 +969,13 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             }
 
             await callGraphQL(graphqlEndpoint, mutation, variables);
+            // The row's comment editor has done its job once the action it was written for landed:
+            // its text has either just been saved (taskDataComment above) or was never touched.
+            // Dropped here rather than left open, so the reloaded row doesn't come back carrying a
+            // draft that is now either redundant or about a decision already recorded.
+            const actedTaskId = String(variables.id);
+            commentDrafts.current.delete(actedTaskId);
+            setOpenCommentTaskId(current => (current === actedTaskId ? null : current));
             await loadPage(currentPage);
         } catch (e) {
             setError(e instanceof Error ? e.message : t('common.error.action', 'Unable to complete this action.'));
@@ -722,6 +983,10 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             setBusyTaskId(null);
         }
     }, [graphqlEndpoint, currentPage, loadPage, t]);
+
+    const handleOpenComment = useCallback((taskId: string) => setOpenCommentTaskId(taskId), []);
+    const handlePreview = useCallback((target: PreviewTarget) => setPreviewTarget(target), []);
+    const handleClosePreview = useCallback(() => setPreviewTarget(null), []);
 
     const rows: TaskRow[] = useMemo(() => connection.edges.map(edge => ({
         ...edge.node,
@@ -737,7 +1002,16 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             // Only shown in the claimable scope: everywhere else the row is either already
             // someone's or listed alongside tasks that aren't offered to anyone in particular,
             // and a "who else could take this" line would just be noise.
-            render: ({data}) => <TaskCell task={data} showCandidates={scope === SCOPE_CLAIMABLE} locale={locale}/>
+            render: ({data}) => (
+                <TaskCell
+                    task={data}
+                    showCandidates={scope === SCOPE_CLAIMABLE}
+                    locale={locale}
+                    isCommentOpen={openCommentTaskId === data.id}
+                    isBusy={busyTaskId === data.id}
+                    commentDrafts={commentDrafts}
+                />
+            )
         },
         {
             key: 'dueDate',
@@ -803,18 +1077,27 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         {
             key: 'actions',
             label: t('board.columns.actions', 'Actions'),
-            width: '280px',
+            // Down from 280px: every action moved into the kebab's menu, so this column only has to
+            // hold one icon button -- wide enough for that plus the column header's own "Actions"
+            // label, which is what stops this being narrower still. Any change to this number has
+            // to be carried into the table's min-width in TaskBoard.client.css, which is the sum of
+            // the fixed columns.
+            width: '80px',
             render: ({data}) => (
-                <TaskActions
+                <TaskRowActions
                     task={data}
                     currentUserKey={currentUserKey}
                     canReviewAll={canReviewAll}
                     isBusy={busyTaskId === data.id}
+                    isCommentOpen={openCommentTaskId === data.id}
+                    commentDrafts={commentDrafts}
                     onAction={handleAction}
+                    onOpenComment={handleOpenComment}
+                    onPreview={handlePreview}
                 />
             )
         }
-    ], [scope, currentUserKey, canReviewAll, busyTaskId, handleAction, t, tPlural, locale]);
+    ], [scope, currentUserKey, canReviewAll, busyTaskId, openCommentTaskId, handleAction, handleOpenComment, handlePreview, t, tPlural, locale]);
 
     const activeScope = SCOPE_OPTIONS.find(option => option.scope === scope) ?? SCOPE_OPTIONS[SCOPE_OPTIONS.length - 1];
     const searchLabel = t('board.search.label', 'Search:');
@@ -860,81 +1143,87 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             // theme (white strip, dark title on it). Every colour on this board is now a token.
             header={<Header title={t('board.title', 'Tasks')}/>}
             content={(
-                <div className="task-board__content">
-                    <div className="task-board__scopes">
-                        {/* Moonstone renders Tab as role="tablist" and each TabItem as a
-                            <button role="tab" aria-selected> with arrow-key navigation between
-                            siblings, so the selector is already operable from the keyboard. What it
-                            does not do is name the tablist or tie the tabs to what they control --
-                            both supplied here (Moonstone spreads unknown props straight onto the
-                            rendered element). */}
-                        <Tab aria-label={t('board.scopes.label', 'Task scope')}>
-                            {SCOPE_OPTIONS.map(option => (
-                                <TabItem
-                                    key={option.scope}
-                                    id={SCOPE_TAB_ID(option.scope)}
-                                    aria-controls={SCOPE_PANEL_ID}
-                                    label={option.label(t)}
-                                    isSelected={scope === option.scope}
-                                    onClick={() => setScope(option.scope)}
+                <>
+                    <div className="task-board__content">
+                        <div className="task-board__scopes">
+                            {/* Moonstone renders Tab as role="tablist" and each TabItem as a
+                                <button role="tab" aria-selected> with arrow-key navigation between
+                                siblings, so the selector is already operable from the keyboard. What it
+                                does not do is name the tablist or tie the tabs to what they control --
+                                both supplied here (Moonstone spreads unknown props straight onto the
+                                rendered element). */}
+                            <Tab aria-label={t('board.scopes.label', 'Task scope')}>
+                                {SCOPE_OPTIONS.map(option => (
+                                    <TabItem
+                                        key={option.scope}
+                                        id={SCOPE_TAB_ID(option.scope)}
+                                        aria-controls={SCOPE_PANEL_ID}
+                                        label={option.label(t)}
+                                        isSelected={scope === option.scope}
+                                        onClick={() => setScope(option.scope)}
+                                    />
+                                ))}
+                            </Tab>
+                            <div className="task-board__show-finished">
+                                {/* Moonstone's Switch spreads its rest props onto the underlying
+                                    <input type="checkbox">, so this id is the input's own -- which is
+                                    what makes the <label for> below a real accessible name for the
+                                    control rather than a caption sitting next to it. */}
+                                <Switch
+                                    id="task-board-show-finished"
+                                    checked={showFinished}
+                                    isDisabled={isLoading}
+                                    onChange={() => setShowFinished(current => !current)}
                                 />
-                            ))}
-                        </Tab>
-                        <div className="task-board__show-finished">
-                            {/* Moonstone's Switch spreads its rest props onto the underlying
-                                <input type="checkbox">, so this id is the input's own -- which is
-                                what makes the <label for> below a real accessible name for the
-                                control rather than a caption sitting next to it. */}
-                            <Switch
-                                id="task-board-show-finished"
-                                checked={showFinished}
-                                isDisabled={isLoading}
-                                onChange={() => setShowFinished(current => !current)}
-                            />
-                            <label htmlFor="task-board-show-finished">
-                                <Typography component="span" variant="body">
-                                    {t('board.showFinished', 'Show finished')}
-                                </Typography>
-                            </label>
+                                <label htmlFor="task-board-show-finished">
+                                    <Typography component="span" variant="body">
+                                        {t('board.showFinished', 'Show finished')}
+                                    </Typography>
+                                </label>
+                            </div>
+                        </div>
+                        <div className="task-board__toolbar">
+                            <Typography variant="caption" weight="light">
+                                {tPlural('board.taskCount', connection.pageInfo.totalCount, '{{count}} task', '{{count}} tasks')}
+                            </Typography>
+                            <div className="task-board__search">
+                                <Typography id="task-board-search-label" variant="body" weight="semiBold">{searchLabel}</Typography>
+                                <Input
+                                    className="task-board__search-input"
+                                    icon={<Search/>}
+                                    placeholder={t('board.search.placeholder', 'Search tasks...')}
+                                    value={searchInput}
+                                    // The visible "Search:" text is a Typography span, not a <label>,
+                                    // so it can't be associated with for/htmlFor -- referenced by id
+                                    // instead, which gives the input the same accessible name without
+                                    // changing the layout.
+                                    aria-labelledby="task-board-search-label"
+                                    onChange={e => setSearchInput(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        {error && (
+                            // role="alert" (an assertive live region): the banner appears in response to
+                            // an action the user just took and states why it failed, which is the one
+                            // thing on this board worth interrupting for.
+                            <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">
+                                {error}
+                            </Banner>
+                        )}
+                        <div
+                            id={SCOPE_PANEL_ID}
+                            className="task-board__panel"
+                            role="tabpanel"
+                            aria-labelledby={SCOPE_TAB_ID(scope)}
+                        >
+                            {boardContent}
                         </div>
                     </div>
-                    <div className="task-board__toolbar">
-                        <Typography variant="caption" weight="light">
-                            {tPlural('board.taskCount', connection.pageInfo.totalCount, '{{count}} task', '{{count}} tasks')}
-                        </Typography>
-                        <div className="task-board__search">
-                            <Typography id="task-board-search-label" variant="body" weight="semiBold">{searchLabel}</Typography>
-                            <Input
-                                className="task-board__search-input"
-                                icon={<Search/>}
-                                placeholder={t('board.search.placeholder', 'Search tasks...')}
-                                value={searchInput}
-                                // The visible "Search:" text is a Typography span, not a <label>,
-                                // so it can't be associated with for/htmlFor -- referenced by id
-                                // instead, which gives the input the same accessible name without
-                                // changing the layout.
-                                aria-labelledby="task-board-search-label"
-                                onChange={e => setSearchInput(e.target.value)}
-                            />
-                        </div>
-                    </div>
-                    {error && (
-                        // role="alert" (an assertive live region): the banner appears in response to
-                        // an action the user just took and states why it failed, which is the one
-                        // thing on this board worth interrupting for.
-                        <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">
-                            {error}
-                        </Banner>
-                    )}
-                    <div
-                        id={SCOPE_PANEL_ID}
-                        className="task-board__panel"
-                        role="tabpanel"
-                        aria-labelledby={SCOPE_TAB_ID(scope)}
-                    >
-                        {boardContent}
-                    </div>
-                </div>
+                    {/* Outside .task-board__content on purpose: that element is the board's own scroll
+                        container (overflow on both axes), and this panel is pinned to the viewport
+                        rather than to the table it floats over. */}
+                    {previewTarget && <TaskPreviewPanel target={previewTarget} onClose={handleClosePreview}/>}
+                </>
             )}
         />
     );

@@ -80,10 +80,17 @@
     },
     "actions": {
       "addComment": "Ajouter un commentaire",
-      "oneClickHint": "Vous attribue cette tâche et enregistre votre décision en une seule étape"
+      "oneClickHint": "Vous attribue cette tâche et enregistre votre décision en une seule étape",
+      "showMenu": "Afficher les actions de la tâche",
+      "previewInNewTab": "Prévisualiser dans un nouvel onglet"
     },
     "comment": {
       "placeholder": "Commentaire (facultatif)"
+    },
+    "preview": {
+      "label": "Prévisualisation du contenu",
+      "close": "Fermer la prévisualisation",
+      "task": "Tâche : {{title}}"
     },
     "meta": {
       "createdBy": "Créée par : {{creator}}, le {{date}}",

@@ -80,10 +80,17 @@
     },
     "actions": {
       "addComment": "Add a comment",
-      "oneClickHint": "Assigns this task to you and records your decision in one step"
+      "oneClickHint": "Assigns this task to you and records your decision in one step",
+      "showMenu": "Show task actions",
+      "previewInNewTab": "Preview in a new tab"
     },
     "comment": {
       "placeholder": "Comment (optional)"
+    },
+    "preview": {
+      "label": "Content preview",
+      "close": "Close preview",
+      "task": "Task: {{title}}"
     },
     "meta": {
       "createdBy": "Created by: {{creator}}, on {{date}}",

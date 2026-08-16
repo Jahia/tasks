@@ -80,8 +80,8 @@
 }
 
 /* Moonstone's DataTable fixes every body row at 48px (hashed _tableRow_ class) and its cells
-   clip overflow -- but this board's Task cell (title + summary + caption lines) and Actions cell
-   (stacked button rows, optional comment box) are deliberately taller than one line. Let rows
+   clip overflow -- but this board's Task cell (title + summary + caption lines, plus the comment
+   box once a reviewer opens one) is deliberately taller than one line. Let rows
    grow with their content instead of clipping it; min-height keeps sparse rows on Moonstone's
    native rhythm. Rows are flex containers in Moonstone's DataTable, so top-align the columns --
    a centred one-line State chip floating beside a three-line Task cell reads as misaligned. */
@@ -119,14 +119,14 @@
 }
 
 /* min-width is the sum of the fixed columns (Due 140 + Priority 120 + Waiting 120 + Owner 160 +
-   State 120 + Actions 280 = 940) plus the Task column's own min-width (200) minus a little
+   State 120 + Actions 80 = 740) plus the Task column's own min-width (200) minus 120px of
    slack -- below it the board scrolls horizontally rather than letting the rows wrap. Raised from
-   760px when Due and Priority were added (#66): every fixed column added here has to be added to
-   this number too, or the new columns eat the flexible Task column instead of extending the
-   table. */
+   760px when Due and Priority were added (#66), then LOWERED from 1020px when the Actions column
+   shrank from 280px to the 80px kebab: every fixed column resized here has to be carried into
+   this number too, or the fixed columns either eat the flexible Task column or leave it a gap. */
 .task-board__content table {
     width: 100%;
-    min-width: 1020px;
+    min-width: 820px;
 }
 
 .task-board__content thead tr,
@@ -190,26 +190,111 @@
     margin: 0;
 }
 
-.task-board__actions {
+/* The row's 3-dot action menu, following jcontent's content table: one kebab per row, right-aligned
+   in its own narrow cell and revealed on row hover (ContentTable.scss does
+   `.tableRow:hover .cellActions {visibility: inherit}` over a `visibility: hidden` cell).
+
+   opacity rather than jcontent's visibility, deliberately: a visibility:hidden button is removed
+   from the tab order entirely, so the kebab could never be reached from the keyboard -- hover
+   would be the ONLY way to it. At opacity 0 the button stays focusable and the :focus-within rule
+   below reveals it the moment it takes focus, so tabbing across the board shows each row's menu
+   button as it is reached. The --open modifier does the same while the menu itself is up, which is
+   what keeps the button (and therefore its anchored menu) on screen after the pointer has left the
+   row to travel down the menu. */
+.task-board__row-actions {
     display: flex;
-    flex-direction: column;
-    gap: var(--spacing-small);
+    justify-content: flex-end;
+    width: 100%;
+    opacity: 0;
+    transition: opacity 120ms ease-in-out;
 }
 
-.task-board__actions-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--spacing-small);
+.task-board__content tbody tr:hover .task-board__row-actions,
+.task-board__content tbody tr:focus-within .task-board__row-actions,
+.task-board__row-actions--open {
+    opacity: 1;
 }
 
-/* Extra spacing above the workflow-decision buttons (Reject publication/Publish), keeping them
-   visually separated from the routine task-management actions above (Unassign/Suspend/Preview). */
-.task-board__actions-row--decisions {
+/* The optional decision comment, opened from the row's action menu. It is rendered in the TASK
+   cell, not beside the menu that opens it: the Actions column is 80px now and could not hold a
+   text box. Full width of that (flexible) column, with air above it so it doesn't crowd the
+   created-by caption it follows. */
+.task-board__comment {
+    width: 100%;
     margin-top: var(--spacing-small);
 }
 
-/* The optional decision comment, revealed in place of its "Add a comment" button. Full cell width
-   (the Actions column is a fixed 280px) so the box doesn't shrink to a one-word slot. */
-.task-board__comment {
+/* The "Preview" side panel. Pinned to the viewport's right edge rather than laid out beside the
+   table the way jcontent's is: this board is one admin-dashboard tile inside the app shell's own
+   layout, with no region of its own to split into two columns.
+   z-index sits BELOW Moonstone's Menu (9000) and its click-away overlay (8500), so a row's action
+   menu still opens on top of an already-open panel instead of behind it.
+   Paper supplies the surface (background, elevation) and expects to be a block in a page flow,
+   hence the margin/radius reset here. */
+.task-board__preview {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 8000;
+
+    display: flex;
+    flex-direction: column;
+    width: min(720px, 60vw);
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+
+    margin-top: 0;
+    border-radius: 0;
+
+    animation: task-board__preview-in 160ms ease-out;
+}
+
+@keyframes task-board__preview-in {
+    from {
+        transform: translateX(100%);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+/* Both the panel's entrance and the hover fade above are decoration -- the panel is fully usable
+   without either, so neither is imposed on a viewer who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+    .task-board__preview {
+        animation: none;
+    }
+
+    .task-board__row-actions {
+        transition: none;
+    }
+}
+
+.task-board__preview-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing-medium);
+    padding: var(--spacing-medium);
+    border-bottom: 1px solid var(--color-gray_light);
+}
+
+/* min-width:0 so a long page title wraps (or is squeezed) instead of pushing the close button off
+   the panel -- a flex item's default min-width is its content's intrinsic width. */
+.task-board__preview-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* flex + min-height:0 so the frame takes the panel's whole remaining height rather than the
+   150px an <iframe> is intrinsically sized at. */
+.task-board__preview-frame {
+    flex: 1 1 auto;
+    min-height: 0;
     width: 100%;
+    border: 0;
 }

@@ -80,10 +80,17 @@
     },
     "actions": {
       "addComment": "Kommentar hinzufügen",
-      "oneClickHint": "Weist Ihnen diese Aufgabe zu und erfasst Ihre Entscheidung in einem Schritt"
+      "oneClickHint": "Weist Ihnen diese Aufgabe zu und erfasst Ihre Entscheidung in einem Schritt",
+      "showMenu": "Aufgabenaktionen anzeigen",
+      "previewInNewTab": "Vorschau in einem neuen Tab"
     },
     "comment": {
       "placeholder": "Kommentar (optional)"
+    },
+    "preview": {
+      "label": "Inhaltsvorschau",
+      "close": "Vorschau schließen",
+      "task": "Aufgabe: {{title}}"
     },
     "meta": {
       "createdBy": "Erstellt von: {{creator}}, am {{date}}",

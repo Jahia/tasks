@@ -58,7 +58,7 @@ function buildActions(t: Translate, task: TaskNode, canAct: boolean, currentUser
         actions.push({label: t('common.actions.assignToMe', 'Assign to me'), mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}, patch: {owner: currentUserKey}});
     }
 
-    // Matches TaskBoard.client.tsx's TaskActions: a suspended task can only be resumed, not
+    // Matches TaskBoard.client.tsx's TaskRowActions: a suspended task can only be resumed, not
     // unassigned directly -- Refuse is only offered while active or started.
     if (canAct && (task.state === 'active' || task.state === 'started')) {
         actions.push({label: t('list.actions.refuse', 'Refuse'), mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
