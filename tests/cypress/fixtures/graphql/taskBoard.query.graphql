@@ -1,6 +1,6 @@
 # Every field the React board actually asks for (see TASK_BOARD_PAGE_SELECTION in
-# src/client/components/taskBoard.shared.ts), plus taskType, which only the tests need -- so a
-# server-side change that breaks the board's own selection breaks this suite too, rather than
+# src/client/components/taskBoard.shared.ts), plus possibleOutcomes, which only the tests need -- so
+# a server-side change that breaks the board's own selection breaks this suite too, rather than
 # passing against a narrower query no client ever sends.
 query TaskBoard(
     $first: Int!
@@ -46,6 +46,7 @@ query TaskBoard(
                     name
                     displayLabel
                 }
+                description
                 workflowSummary
                 simpleWorkflowTaskData {
                     id
@@ -53,7 +54,6 @@ query TaskBoard(
                 }
                 targetNode {
                     url
-                    uuid
                     path
                     property(name: "jcr:title") {
                         value

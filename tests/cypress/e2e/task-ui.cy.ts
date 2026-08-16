@@ -8,17 +8,29 @@ import {addTask, startPublicationReview} from '../support/taskFixtures';
 //
 // What it asserts is the screen as it is NOW: a Moonstone DataTable (not the card list this spec
 // used to describe), whose per-row actions live behind a hover/focus-revealed kebab menu, above
-// scope tabs and a "Show finished" toggle, with a tabbed preview side panel (Preview / Details /
-// Usages / History, #61). Every selector below is either a real class or id this module owns
-// (task-board__*, task-board-preview-panel-*) or a role/label the component sets on purpose -- no
-// Moonstone-internal class names, which would break on a component upgrade that changes nothing
-// this spec is about.
+// scope tabs and a "Show finished" toggle, with a preview side panel showing jContent's own content
+// side panel (#61, jcontent#2700). Every selector below is either a real class this module owns
+// (task-board__*) or a role/label the component sets on purpose -- no Moonstone-internal class
+// names, which would break on a component upgrade that changes nothing this spec is about.
+//
+// <h3>What this suite can and cannot see of that panel</h3>
+// The panel's BODY is jContent's, loaded at runtime from its './ContentSidePanel' federated module.
+// This instance is a bare Jahia: the jContent it ships predates jcontent#2700 and its container has
+// no such module, so `container.get()` rejects and the panel degrades to the plain preview iframe
+// it showed before #61. That degradation is what the specs below assert -- deliberately, since it
+// is the behaviour of every installation without a jContent new enough to help, and the only one
+// reproducible here. The mounted-panel path (the tab strip, the tabs' contents, mount/unmount on a
+// row swap) is verified in a browser against the development bench, which runs 3.7.1-SNAPSHOT.
 const CONTENT_ROOT = `/sites/${SITE_KEY}/contents`;
 const TASKS_CONTAINER = `${CONTENT_ROOT}/e2e-ui-tasks`;
-// Per-run, for the same reason the schedule spec's target is (see runScopedName): the History tab
-// asserted below reports the engine's processes for THIS node's path, and a fixed path would
-// accumulate one finished process per previous run beside the one this run started.
+// Per-run, for the same reason the schedule spec's targets are (see runScopedName): starting a
+// publication leaves a process in the engine's own store, which deleteSite does not remove, indexed
+// by the path it ran on -- so a fixed path accumulates one per previous run.
+//
+// Two of them: the panel is a SINGLE instance that swaps its target, and one target cannot show
+// that swapping really re-targets it.
 const REVIEW_TARGET_NAME = runScopedName('e2e-ui-review-target');
+const OTHER_REVIEW_TARGET_NAME = runScopedName('e2e-ui-other-review-target');
 
 // Created oldest-first, so the board's default ordering (newest created first) is the REVERSE of
 // this list -- which is what makes the ordering assertion below say something.
@@ -92,34 +104,34 @@ function rowFor(title: string) {
 // every action re-fetches the page underneath the row (handleAction -> loadPage), and the kebab is
 // disabled for as long as that row is busy -- so a menu opened straight after a previous action
 // races the reload it triggered.
-function openRowMenu(title: string) {
-    rowFor(title).find(KEBAB).should('not.be.disabled').focus().click();
+//
+// `force` is for the one case that needs it: the preview panel is pinned to the right of the
+// VIEWPORT, and the Actions column is the rightmost one of a table that ends at the same edge -- so
+// with a panel already open, every kebab is behind it. A real user reaches this state from the
+// keyboard (the row reveals its kebab on :focus-within, and the menu itself renders above the
+// panel), which is what the .focus() below models; the forced click is only Cypress's pointer-level
+// equivalent of the Enter that would follow. Nothing about the panel's own behaviour is bypassed.
+function openRowMenu(title: string, force = false) {
+    rowFor(title).find(KEBAB).should('not.be.disabled').focus().click({force});
 }
 
-// Opens the preview side panel on the workflow task's target. Every panel test starts here, so the
-// "which of the two Preview items" subtlety is stated once: the menu offers "Preview" and "Preview
-// in a new tab", and an unanchored substring match would pick whichever came first.
-function openPreview() {
-    search('Publication review');
-    openRowMenu('Publication review');
+// Opens the preview side panel from one row. The "which of the two Preview items" subtlety is
+// stated once here: the menu offers "Preview" and "Preview in a new tab", and an unanchored
+// substring match would pick whichever came first.
+//
+// Rows are addressed by TARGET name rather than by "Publication review": both review tasks carry
+// that phrase (the engine names a task "<step> : <target>"), and the panel opened has to be the one
+// the assertion is about.
+function previewFromRow(targetName: string, force = false) {
+    openRowMenu(targetName, force);
     cy.contains('[role="menuitem"], li', 'Preview in a new tab').should('be.visible');
-    cy.contains('[role="menuitem"], li', /^Preview$/).click();
+    cy.contains('[role="menuitem"], li', /^Preview$/).click({force});
     cy.get('.task-board__preview').should('be.visible');
 }
 
-// The panel's OWN tab strip. Scoped to the panel because the board's scope selector is a tablist
-// too, and both are on screen while the panel is open.
-function panelTabs() {
-    return cy.get('.task-board__preview [role="tab"]');
-}
-
-function panelTab(label: string) {
-    return cy.get('.task-board__preview').contains('[role="tab"]', label);
-}
-
-function selectPanelTab(label: string) {
-    panelTab(label).click();
-    panelTab(label).should('have.attr', 'aria-selected', 'true');
+function openPreview(targetName: string) {
+    search(targetName);
+    previewFromRow(targetName);
 }
 
 describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
@@ -127,15 +139,17 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
         createSite(SITE_KEY, {templateSet: TEST_TEMPLATE_SET, serverName: SITE_KEY, locale: 'en'});
         addNode({parentPathOrId: CONTENT_ROOT, primaryNodeType: 'jnt:tasks', name: 'e2e-ui-tasks'});
         addNode({parentPathOrId: CONTENT_ROOT, primaryNodeType: 'jnt:contentFolder', name: REVIEW_TARGET_NAME});
+        addNode({parentPathOrId: CONTENT_ROOT, primaryNodeType: 'jnt:contentFolder', name: OTHER_REVIEW_TARGET_NAME});
 
         addTask(TASKS_CONTAINER, OLDEST, [{name: 'state', value: 'active'}, {name: 'priority', value: 'high'}]);
         addTask(TASKS_CONTAINER, MIDDLE, [{name: 'state', value: 'active'}]);
         addTask(TASKS_CONTAINER, NEWEST, [{name: 'state', value: 'active'}]);
         addTask(TASKS_CONTAINER, FINISHED, [{name: 'state', value: 'finished'}]);
 
-        // A real workflow task, so the preview panel has a target to show: a plain jnt:task has no
+        // Real workflow tasks, so the preview panel has a target to show: a plain jnt:task has no
         // targetNode at all, and the two Preview actions are only offered when one resolves.
         startPublicationReview(`${CONTENT_ROOT}/${REVIEW_TARGET_NAME}`);
+        startPublicationReview(`${CONTENT_ROOT}/${OTHER_REVIEW_TARGET_NAME}`);
     });
 
     after(() => {
@@ -238,13 +252,12 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
     });
 
     it('previews the content under review beside the board, and closes again', () => {
-        openPreview();
+        openPreview(REVIEW_TARGET_NAME);
 
         cy.get('.task-board__preview').should('be.visible').within(() => {
             // The panel names both what it shows and the task it was opened for, and it is a
             // dialog that does not claim to be modal (the board behind it stays usable).
             cy.contains('Task:').should('be.visible');
-            cy.get('iframe.task-board__preview-frame').should('exist');
         });
         cy.get('.task-board__preview').should('have.attr', 'role', 'dialog');
 
@@ -252,63 +265,39 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
         cy.get('.task-board__preview').should('not.exist');
     });
 
-    it('opens on the Preview tab, and offers the other three beside it', () => {
-        openPreview();
+    it('falls back to the plain preview, and says so, where jContent cannot supply its panel', () => {
+        openPreview(REVIEW_TARGET_NAME);
 
-        // Scoped to the panel: the board's own scope selector is a tablist too, and an unscoped
-        // [role="tab"] would count all seven.
-        panelTabs().should('have.length', 4);
-        ['Preview', 'Details', 'Usages', 'History'].forEach(tab => {
-            panelTab(tab).should('be.visible');
+        cy.get('.task-board__preview').within(() => {
+            // The frame, and a caption naming what is missing and why -- not an error, and not an
+            // empty panel: the board is usable on an installation without jContent, which is the
+            // whole reason it does not simply link out to it.
+            cy.get('iframe.task-board__preview-frame').should('exist');
+            cy.contains('.task-board__preview-caption', 'jContent').should('be.visible');
+            cy.contains('.task-board__preview-caption', 'not installed').should('be.visible');
+            // No tab strip of its own in this state -- the tabs are jContent's, and jContent is
+            // exactly what is absent. (Scoped to the panel: the board's scope selector is a
+            // tablist too, and it is on screen behind this one.)
+            cy.get('[role="tab"]').should('not.exist');
         });
-        panelTab('Preview').should('have.attr', 'aria-selected', 'true');
-        // Every tab points at the panel it controls, and that panel names it back.
-        panelTab('Details').should('have.attr', 'aria-controls', 'task-board-preview-panel-details');
-        cy.get('#task-board-preview-panel-details').should('have.attr', 'role', 'tabpanel');
     });
 
-    it('answers about the reviewed content on the Details tab', () => {
-        openPreview();
-        selectPanelTab('Details');
+    it('swaps its target instead of stacking a second panel', () => {
+        // ONE search, matching both fixtures, so both rows are on screen before the panel opens:
+        // the search box sits at the right of the toolbar and is behind the panel once it is up.
+        search('review-target');
 
-        cy.get('#task-board-preview-panel-details').should('be.visible').within(() => {
-            // Labelled rows, not raw JSON: the label is a <dt>, the value the <dd> beside it.
-            cy.contains('dt', 'Content type').should('be.visible');
-            cy.contains('dd', 'Content Folder').should('be.visible');
-            cy.contains('dt', 'Path').should('be.visible');
-            cy.contains('dd', `${CONTENT_ROOT}/${REVIEW_TARGET_NAME}`).should('be.visible');
-            // aggregatedPublicationInfo is queryable on this provider, so the status row is there;
-            // the target has never been published.
-            cy.contains('dt', 'Publication status').should('be.visible');
-            cy.contains('Not published').should('be.visible');
-        });
+        previewFromRow(REVIEW_TARGET_NAME);
+        cy.get('.task-board__preview').should('contain.text', REVIEW_TARGET_NAME);
 
-        // The iframe survives a tab switch -- the panels are hidden, not unmounted, so coming back
-        // to Preview does not re-request the page.
-        cy.get('iframe.task-board__preview-frame').should('exist');
-    });
-
-    it('reports what references the reviewed content on the Usages tab', () => {
-        openPreview();
-        selectPanelTab('Usages');
-
-        // Nothing points at this folder except the workflow task the panel was opened from, and
-        // that one is filtered out server-side -- so the honest answer is the empty state.
-        cy.get('#task-board-preview-panel-usages')
-            .should('be.visible')
-            .and('contain.text', 'No other content references this one.');
-    });
-
-    it('shows the running publication request on the History tab', () => {
-        openPreview();
-        selectPanelTab('History');
-
-        cy.get('#task-board-preview-panel-history').should('be.visible').within(() => {
-            cy.contains('h3', 'Workflow').should('be.visible');
-            // The one fact that exists the moment a request is raised: who started what, when.
-            // Neither activeTasks (due-dated steps only) nor history (ended steps only) carries it.
-            cy.contains('started by root').should('be.visible');
-            cy.contains('Running').should('be.visible');
-        });
+        // Same single instance, re-targeted: this is the interaction that tears down whatever the
+        // panel was showing and builds it again for the other node (in the mounted case, a whole
+        // React root of jContent's -- keyed by the target, so nothing of the previous one is
+        // reused), and the failure it guards against is two panels on top of each other, or one
+        // still showing the node it was opened on.
+        previewFromRow(OTHER_REVIEW_TARGET_NAME, true);
+        cy.get('.task-board__preview').should('have.length', 1);
+        cy.get('.task-board__preview').should('contain.text', OTHER_REVIEW_TARGET_NAME);
+        cy.get('.task-board__preview').should('not.contain.text', REVIEW_TARGET_NAME);
     });
 });

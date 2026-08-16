@@ -81,6 +81,11 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             state
             dueDate
             priority
+            # The primary node type. Read for exactly one thing on this board: deciding whether a
+            # row's description is the workflow engine's summary (and therefore says which language
+            # the review was raised for) or free text somebody typed -- see resolvePreviewLanguage
+            # in ./taskPreview.shared.
+            taskType
             possibleOutcomeDetails(language: $language) {
                 name
                 displayLabel
@@ -96,10 +101,9 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             }
             targetNode {
                 url
-                # uuid/path are what the preview side panel's Details, Usages and History tabs
-                # query on (#61) -- two scalars off a node the row already resolves, rather than a
-                # second round trip when the panel opens.
-                uuid
+                # What the preview side panel hands jContent's own content side panel (jcontent
+                # #2700) to identify the node -- one scalar off a node the row already resolves,
+                # rather than a second round trip when the panel opens.
                 path
                 property(name: "jcr:title") {
                     value
@@ -232,6 +236,8 @@ export type TaskBoardNode = {
     // "low" | "normal" | "high" -- jnt:task's own choicelist (definitions.cnd). Kept a plain
     // string for the same reason viewerRole is: the server returns the stored value verbatim.
     priority: string | null;
+    // "jnt:task" | "jnt:workflowTask" -- the node's primary type, as the server reports it.
+    taskType: string | null;
     possibleOutcomeDetails: TaskBoardOutcome[];
     description: string | null;
     workflowSummary: string | null;
@@ -248,7 +254,7 @@ export type TaskBoardNode = {
     // The jnt:simpleWorkflow child carrying the reviewer's comment, when this task has one; null
     // for every plain task and for any other taskData node type.
     simpleWorkflowTaskData: {id: string; comment: string | null} | null;
-    targetNode: {url: string; uuid: string; path: string; property: {value: string} | null} | null;
+    targetNode: {url: string; path: string; property: {value: string} | null} | null;
 };
 
 export type TaskBoardConnection = {

@@ -38,7 +38,7 @@ import {priorityLabel, stateLabel, UPDATE_TASK_STATE_MUTATION} from './task.shar
 import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
 import TaskPreviewPanel from './TaskPreviewPanel';
 import type {PreviewTarget} from './TaskPreviewPanel';
-import {languageOfRenderUrl, toContentLanguage} from './taskPreview.shared';
+import {resolvePreviewLanguage} from './taskPreview.shared';
 import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -240,12 +240,17 @@ type TaskActionRequest = {
 };
 
 // What a row's "Preview" action asks the board to show in its side panel is PreviewTarget, defined
-// beside the panel that consumes it (./TaskPreviewPanel) rather than here: since #61 it carries the
-// previewed node's uuid/path/language too, which only that component's tabs read.
+// beside the panel that consumes it (./TaskPreviewPanel) rather than here: it carries the previewed
+// node's path and the language to show it in, which is what jContent's mounted side panel resolves.
 //
 // A ROW supplies everything but the language, which is not a property of the row at all: it is the
-// language the preview is being looked at in, resolved once by the board (see handlePreview).
-type PreviewRequest = Omit<PreviewTarget, 'language'>;
+// language the preview is being looked at in, resolved once by the board (see handlePreview). The
+// two task fields the row DOES contribute to that decision travel with the request -- see
+// resolvePreviewLanguage for why the task's own description is where its language is written.
+type PreviewRequest = Omit<PreviewTarget, 'language'> & {
+    taskType: string | null;
+    description: string | null;
+};
 
 type TaskRowActionsProps = {
     task: TaskBoardNode;
@@ -449,8 +454,9 @@ function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOp
                     title: targetTitle ?? taskTitle,
                     taskTitle,
                     url: targetUrl,
-                    uuid: targetNode.uuid,
-                    path: targetNode.path
+                    path: targetNode.path,
+                    taskType: task.taskType,
+                    description: task.description
                 }))}
             />,
             <MenuItem
@@ -844,15 +850,13 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     }, [graphqlEndpoint, currentPage, loadPage, t]);
 
     const handleOpenComment = useCallback((taskId: string) => setOpenCommentTaskId(taskId), []);
-    // The panel's three data tabs all query per LANGUAGE, and the honest answer to "which one" is
-    // the language the iframe beside them is rendering: the target URL's own language segment,
-    // which the server built (GqlTaskBoard#getTargetNode resolves it through a session that has a
-    // locale, precisely so this segment is right). The viewer's UI locale is the fallback, reduced
-    // to a bare language code -- Jahia stores translations per language, so "fr-FR" would ask for
-    // a translation node that a site declaring plain "fr" does not have.
-    const handlePreview = useCallback((target: PreviewRequest) => setPreviewTarget({
+    // jContent's side panel shows ONE translation of the target throughout, so which one it opens
+    // on is a real decision -- taken here rather than in the panel, since two of its three inputs
+    // (the board's server-side language argument, and the viewer's resolved UI locale) are the
+    // board's own. See resolvePreviewLanguage for the order and the reasoning.
+    const handlePreview = useCallback(({taskType, description, ...target}: PreviewRequest) => setPreviewTarget({
         ...target,
-        language: languageOfRenderUrl(target.url) ?? toContentLanguage(language ?? locale)
+        language: resolvePreviewLanguage({taskType, description, url: target.url}, language ?? locale)
     }), [language, locale]);
     const handleClosePreview = useCallback(() => setPreviewTarget(null), []);
 
@@ -1093,7 +1097,6 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                     {previewTarget && (
                         <TaskPreviewPanel
                             target={previewTarget}
-                            graphqlEndpoint={graphqlEndpoint}
                             onClose={handleClosePreview}
                         />
                     )}

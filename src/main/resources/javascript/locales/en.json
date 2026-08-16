@@ -91,67 +91,7 @@
       "label": "Content preview",
       "close": "Close preview",
       "task": "Task: {{title}}",
-      "tabs": {
-        "label": "Preview sections",
-        "details": "Details",
-        "usages": "Usages",
-        "history": "History"
-      },
-      "details": {
-        "unavailable": "This content is no longer available.",
-        "name": "Name",
-        "type": "Content type",
-        "path": "Path",
-        "uuid": "UUID",
-        "language": "Language",
-        "created": "Created",
-        "createdBy": "Created by",
-        "lastModified": "Last modified",
-        "lastModifiedBy": "Last modified by",
-        "publication": "Publication status",
-        "workInProgress": "Work in progress",
-        "locked": "Locked"
-      },
-      "publication": {
-        "published": "Published",
-        "modified": "Modified",
-        "notPublished": "Not published",
-        "unpublished": "Unpublished",
-        "mandatoryLanguageUnpublishable": "Blocked by a mandatory language",
-        "mandatoryLanguageValid": "Mandatory languages complete",
-        "liveModified": "Modified in live",
-        "liveOnly": "Live only",
-        "conflict": "Conflict",
-        "deleted": "Deleted",
-        "markedForDeletion": "Marked for deletion"
-      },
-      "usages": {
-        "empty": "No other content references this one.",
-        "count": "{{count}} reference",
-        "count_plural": "{{count}} references"
-      },
-      "history": {
-        "workflowTitle": "Workflow",
-        "contentTitle": "Content changes",
-        "noWorkflow": "No workflow has run on this content.",
-        "noChanges": "No recorded changes.",
-        "workflow": "Workflow",
-        "step": "Step",
-        "started": "{{workflow}} started by {{user}} on {{date}}",
-        "by": "by {{user}}",
-        "on": "on {{date}}",
-        "running": "Running",
-        "completed": "Completed",
-        "change": "{{user}}, {{date}}",
-        "actions": {
-          "created": "Created",
-          "added": "Added",
-          "updated": "Updated",
-          "removed": "Removed",
-          "published": "Published",
-          "unpublished": "Unpublished"
-        }
-      }
+      "standalone": "Only the page preview is available here: details, usages and history come from jContent, which is not installed on this server."
     },
     "meta": {
       "createdBy": "Created by: {{creator}}, on {{date}}",

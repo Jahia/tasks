@@ -26,11 +26,15 @@ export type TaskBoardRow = {
     candidateDisplayNames: string[];
     possibleOutcomes: string[];
     possibleOutcomeDetails: Array<{name: string; displayLabel: string}>;
+    // The engine's own one-line summary, stored when it created the task. Its leading language code
+    // is where the board reads the language its preview panel opens in -- see
+    // resolvePreviewLanguage in src/client/components/taskPreview.shared.ts.
+    description: string | null;
     workflowSummary: string | null;
     simpleWorkflowTaskData: {id: string; comment: string | null} | null;
-    // uuid/path are what the board's preview side panel queries its Details, Usages and History
-    // tabs on (#61) -- see PreviewTarget in src/client/components/TaskPreviewPanel.tsx.
-    targetNode: {url: string; uuid: string; path: string; property: {value: string} | null} | null;
+    // path is what the board's preview side panel hands jContent's own content side panel (#61,
+    // jcontent#2700) -- see PreviewTarget in src/client/components/TaskPreviewPanel.tsx.
+    targetNode: {url: string; path: string; property: {value: string} | null} | null;
 };
 
 export type TaskBoardPage = {
