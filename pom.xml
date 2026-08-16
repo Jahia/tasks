@@ -124,15 +124,22 @@
                 <configuration>
                     <!--
                         Both halves of 'yarn clean' (see package.json), not just the first.
-                        The webpack build deliberately has no `clean: true` (see the long note in
-                        webpack.config.cjs) and writes content-hashed chunk names, so every build
-                        that changes a byte of the federated entry leaves the previous build's
-                        chunks behind in the apps/ directory, which Include-Resource then folds into
-                        the jar whole. The plugin's own default only reaches target/, and this
-                        directory is not under it: before the second fileset below, a
-                        `mvn clean install` shipped 18 dead chunks alongside the live ones (observed
-                        2026-08-16), each a full copy of the board, and a string search over the jar
-                        could only ever return the union of every build ever run in that checkout.
+                        Both build outputs live outside target/: dist/ (the SSR + islands build) and
+                        src/main/resources/javascript/apps/ (the federation remote). The plugin's
+                        own default only reaches target/, so `mvn clean` would otherwise leave them
+                        entirely alone.
+                        The second fileset earns its keep: the builds write content-hashed chunk
+                        names, so every build that changes a byte of the entry produces a new set
+                        of filenames, and Include-Resource folds whatever sits in that directory
+                        into the jar whole. Under the old webpack build (removed in #61) nothing
+                        deleted the superseded ones and a `mvn clean install` shipped 18 dead chunks
+                        alongside the live ones (observed 2026-08-16), each a full copy of the
+                        board, so a string search over the jar could only ever return the union of
+                        every build ever run in that checkout. Vite now empties the directory itself
+                        (build.emptyOutDir in vite.federation.config.mjs), which covers the plain
+                        `yarn build` case too; this fileset stays as the guarantee that a
+                        `mvn clean` really does leave a bare tree, independent of what the
+                        JS toolchain of the day happens to do.
                     -->
                     <filesets>
                         <fileset>

@@ -9,6 +9,10 @@ node
 node_modules
 dist
 src/main/resources/javascript/apps
+# Module Federation scratch files written next to the sources by @module-federation/vite
+# (the federation remote build, see vite.federation.config.mjs).
+.__mf__*
+.__federation*
 *.tgz
 yarn-error.log
 gc-*.log

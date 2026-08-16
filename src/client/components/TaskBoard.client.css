@@ -1,7 +1,12 @@
 /* Plain (non-CSS-modules) stylesheet, imported for its side effect only: this component is
-   bundled by both Vite (SSR view) and webpack (admin-dashboard tile), which disagree on
-   CSS-modules export shape (named vs. default) -- a side-effect-only import behaves identically
-   under both, so class names here are hand-prefixed instead to avoid collisions.
+   bundled TWICE, by the two Vite builds this module runs (vite.config.mjs -> the SSR view and its
+   hydrated island, vite.federation.config.mjs -> the admin-dashboard remote), which package CSS
+   very differently -- the first concatenates it into dist/assets/style.css served with the page,
+   the second emits a chunk the federation runtime injects as a <link> when './init' loads. A
+   side-effect-only import of a plain stylesheet is the one form that behaves identically under
+   both (and did under the webpack build the federation half replaced in #61, which disagreed with
+   Vite on the CSS-modules export shape outright); class names here are hand-prefixed instead of
+   scoped by the bundler, to avoid collisions.
 
    Uses Moonstone's own spacing tokens (not fixed px values) so this keeps matching the rest of
    the Jahia admin UI if Moonstone's scale ever changes, instead of drifting out of sync with it. */

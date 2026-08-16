@@ -11,9 +11,10 @@ export default tseslint.config(
     // tests/** is its own package (own package.json/tsconfig, Cypress globals this
     // config doesn't declare) -- a separate toolchain boundary, same reasoning as
     // src/main/**, not something this build's lint step should reach into.
-    // webpack.*.cjs are Node/CommonJS build tooling (require/module/__dirname),
-    // not app source -- same toolchain-boundary reasoning, not TS/ESM like src/**.
-    {ignores: ['dist/**', 'node/**', 'src/main/**', 'target/**', 'tests/**', 'webpack.*.cjs']},
+    // (The 'webpack.*.cjs' ignore that used to sit here went away with the webpack
+    // build itself, #61: the two Vite configs that replaced it are plain ESM and
+    // lint clean like the rest of the root-level sources.)
+    {ignores: ['dist/**', 'node/**', 'src/main/**', 'target/**', 'tests/**']},
     js.configs.recommended,
     tseslint.configs.recommended,
     {

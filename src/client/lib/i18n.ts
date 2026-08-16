@@ -2,16 +2,19 @@
  * i18n for this module's client islands, against the app shell's own i18next instance.
  *
  * <h3>Why a 40-line bridge instead of react-i18next</h3>
- * Every component in src/client is bundled TWICE, by two toolchains, into two very different
- * runtimes:
+ * Every component in src/client is bundled TWICE, by the module's two Vite builds, into two very
+ * different runtimes:
  *
  * <ul>
- *   <li><b>webpack / module federation</b> -> the admin dashboard route (TasksDashboardApp), which
- *       runs inside the app shell. There, i18next is initialized and global, and this module's
- *       'tasks' namespace has already been requested (see src/javascript/init.tsx).</li>
- *   <li><b>Vite</b> -> the SSR-hydrated islands (jnt:currentUserTasks, the task detail view, the
- *       create-task form...), which hydrate on an ordinary rendered page. There is no app shell
- *       there, no i18next, and nothing to initialize one from.</li>
+ *   <li><b>The module-federation remote</b> (vite.federation.config.mjs) -> the admin dashboard
+ *       route (TasksDashboardApp), which runs inside the app shell. There, i18next is initialized
+ *       and global, and this module's 'tasks' namespace has already been requested (see
+ *       src/javascript/init.tsx). (Built by webpack until #61; the runtime it lands in, and
+ *       therefore everything below, is unchanged by that migration.)</li>
+ *   <li><b>The SSR/islands build</b> (vite.config.mjs, @jahia/vite-plugin) -> the SSR-hydrated
+ *       islands (jnt:currentUserTasks, the task detail view, the create-task form...), which
+ *       hydrate on an ordinary rendered page. There is no app shell there, no i18next, and nothing
+ *       to initialize one from.</li>
  * </ul>
  *
  * react-i18next's own no-instance fallback is not usable for the second case: in the version the
