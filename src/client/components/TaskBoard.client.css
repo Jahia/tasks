@@ -59,6 +59,37 @@
     width: 260px;
 }
 
+/* Moonstone's DataTable fixes every body row at 48px (hashed _tableRow_ class) and its cells
+   clip overflow -- but this board's Task cell (title + summary + caption lines) and Actions cell
+   (stacked button rows, optional comment box) are deliberately taller than one line. Let rows
+   grow with their content instead of clipping it; min-height keeps sparse rows on Moonstone's
+   native rhythm. Rows are flex containers in Moonstone's DataTable, so top-align the columns --
+   a centred one-line State chip floating beside a three-line Task cell reads as misaligned. */
+.task-board__content tbody tr {
+    height: auto;
+    min-height: 48px;
+    align-items: flex-start;
+}
+
+/* The Task column carries the row's main content, but an unsized DataTable column gets a fixed
+   default width rather than the remaining space -- let it (header and body alike, rows being flex
+   containers) absorb whatever the fixed-width columns leave over. */
+.task-board__content table {
+    width: 100%;
+}
+
+.task-board__content thead th:first-child,
+.task-board__content tbody td:first-child {
+    flex: 1 1 auto;
+    min-width: 220px;
+}
+
+.task-board__content tbody td {
+    height: auto;
+    padding-top: var(--spacing-small);
+    padding-bottom: var(--spacing-small);
+}
+
 /* The Task column's cell: title line, then the workflow summary and the created-by/candidates
    captions underneath it. A table cell is vertically centred by default, which reads badly for a
    three-line cell sitting next to one-line ones, hence the explicit column layout. */

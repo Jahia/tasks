@@ -7,9 +7,11 @@ import graphql.annotations.annotationTypes.GraphQLNonNull;
 import graphql.annotations.annotationTypes.GraphQLTypeExtension;
 import org.jahia.api.Constants;
 import org.jahia.modules.graphql.provider.dxm.DXGraphQLProvider;
+import org.jahia.services.content.JCRCallback;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
+import org.jahia.services.content.JCRTemplate;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.workflow.WorkflowService;
 import org.jahia.services.workflow.WorkflowTask;
@@ -31,6 +33,17 @@ import java.util.Map;
  * jnt:workflowTask nodes. A mutation must not bypass this path (e.g. by calling
  * WorkflowService directly), or that propagation is skipped and the task node and the
  * real workflow it represents fall out of sync.
+ *
+ * <p>The writes themselves run with system privileges under the caller's identity
+ * ({@link #writeTask}): a jnt:workflowTask node lives under the workflow initiator's own
+ * user space (/users/&lt;initiator&gt;/workflowTasks/...), where an eligible group
+ * candidate or reviewer holds no JCR write ACL at all -- the only write grant the rules
+ * add is "rw" for the assignee, AFTER assignment. Without elevation, every eligibility
+ * check in this class can pass and the claim still dies on
+ * "assigneeUserKey: not allowed to add or modify item" (observed live, 2026-08-16). The
+ * explicit RBAC gates below are therefore the real and only authorization boundary for
+ * these writes; the caller's identity is preserved so the Drools-to-WorkflowService
+ * propagation still attributes engine calls to the actual caller.
  */
 @GraphQLTypeExtension(DXGraphQLProvider.Mutation.class)
 public final class TaskBoardMutationExtensions {
@@ -66,8 +79,8 @@ public final class TaskBoardMutationExtensions {
         // an owner now; updateTaskState(id, "started") (the client's own "Start" action) is what
         // actually advances it, mirroring how unassignTask reverts a task to owner-less "active"
         // rather than some other state.
-        applyClaim(task, session, user);
-        return new GqlTaskBoard(task);
+        applyClaim(user, id);
+        return refreshed(session, id);
     }
 
     @GraphQLField
@@ -79,10 +92,11 @@ public final class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        task.setProperty("assigneeUserKey", "");
-        task.setProperty(PROPERTY_STATE, STATE_ACTIVE);
-        session.save();
-        return new GqlTaskBoard(task);
+        writeTask(user, id, t -> {
+            t.setProperty("assigneeUserKey", "");
+            t.setProperty(PROPERTY_STATE, STATE_ACTIVE);
+        });
+        return refreshed(session, id);
     }
 
     @GraphQLField
@@ -97,9 +111,8 @@ public final class TaskBoardMutationExtensions {
         if (!STATE_STARTED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a started task can be suspended");
         }
-        task.setProperty(PROPERTY_STATE, STATE_SUSPENDED);
-        session.save();
-        return new GqlTaskBoard(task);
+        writeTask(user, id, t -> t.setProperty(PROPERTY_STATE, STATE_SUSPENDED));
+        return refreshed(session, id);
     }
 
     @GraphQLField
@@ -114,9 +127,8 @@ public final class TaskBoardMutationExtensions {
         if (!STATE_SUSPENDED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a suspended task can be resumed");
         }
-        task.setProperty(PROPERTY_STATE, STATE_STARTED);
-        session.save();
-        return new GqlTaskBoard(task);
+        writeTask(user, id, t -> t.setProperty(PROPERTY_STATE, STATE_STARTED));
+        return refreshed(session, id);
     }
 
     @GraphQLField
@@ -134,8 +146,8 @@ public final class TaskBoardMutationExtensions {
         }
         requireDeclaredOutcome(task, outcome);
 
-        applyCompletion(task, session, outcome);
-        return new GqlTaskBoard(task);
+        applyCompletion(user, id, outcome);
+        return refreshed(session, id);
     }
 
     /**
@@ -224,10 +236,10 @@ public final class TaskBoardMutationExtensions {
         requireOutcomePermission(task, outcome);
 
         if (!alreadyMine) {
-            applyClaim(task, session, user);
+            applyClaim(user, id);
         }
-        applyCompletion(task, session, outcome);
-        return new GqlTaskBoard(task);
+        applyCompletion(user, id, outcome);
+        return refreshed(session, id);
     }
 
     // Not part of the enum choicelist in definitions.cnd (only active/started/finished/suspended
@@ -251,9 +263,8 @@ public final class TaskBoardMutationExtensions {
         JCRNodeWrapper task = loadTask(session, id);
         requireCanAct(task, user, session);
 
-        task.setProperty(PROPERTY_STATE, state);
-        session.save();
-        return new GqlTaskBoard(task);
+        writeTask(user, id, t -> t.setProperty(PROPERTY_STATE, state));
+        return refreshed(session, id);
     }
 
     // jnt:task/jnt:workflowTask data is operational content that only ever lives in the
@@ -301,26 +312,55 @@ public final class TaskBoardMutationExtensions {
     }
 
     /**
-     * Claims {@code task} for {@code user}. The write itself is one property + one save, but that save
+     * Claims the task for {@code user}. The write itself is one property + one save, but that save
      * is what fires the "A workflow task has been assigned" rule in rules.drl, which is what actually
      * claims the task in the workflow engine -- see this class's own javadoc.
      */
-    private static void applyClaim(JCRNodeWrapper task, JCRSessionWrapper session, JahiaUser user)
-            throws RepositoryException {
-        task.setProperty("assigneeUserKey", user.getUserKey());
-        session.save();
+    private static void applyClaim(JahiaUser user, String taskId) throws RepositoryException {
+        writeTask(user, taskId, t -> t.setProperty("assigneeUserKey", user.getUserKey()));
     }
 
     /**
-     * Completes {@code task} with {@code outcome}. finalOutcome must be set before state flips to
+     * Completes the task with {@code outcome}. finalOutcome must be set before state flips to
      * "finished" in the same save: the Drools rule reads finalOutcome off this same node when it reacts
      * to the state change, so both writes need to land together in one session.save().
      */
-    private static void applyCompletion(JCRNodeWrapper task, JCRSessionWrapper session, String outcome)
-            throws RepositoryException {
-        task.setProperty("finalOutcome", outcome);
-        task.setProperty(PROPERTY_STATE, STATE_FINISHED);
-        session.save();
+    private static void applyCompletion(JahiaUser user, String taskId, String outcome) throws RepositoryException {
+        writeTask(user, taskId, t -> {
+            t.setProperty("finalOutcome", outcome);
+            t.setProperty(PROPERTY_STATE, STATE_FINISHED);
+        });
+    }
+
+    @FunctionalInterface
+    private interface TaskWrite {
+        void apply(JCRNodeWrapper task) throws RepositoryException;
+    }
+
+    /**
+     * Applies one task-node write in its own save, with system privileges under the caller's
+     * identity -- see the class javadoc for why elevation is required (candidates and reviewers
+     * hold no JCR write ACL on a task node in the initiator's user space) and why identity is
+     * preserved (Drools-to-engine attribution). Only ever call this AFTER the mutation's RBAC
+     * gate has passed; this method is the privileged write, not the authorization.
+     */
+    private static void writeTask(JahiaUser user, String taskId, TaskWrite write) throws RepositoryException {
+        JCRTemplate.getInstance().doExecuteWithSystemSessionAsUser(user, Constants.EDIT_WORKSPACE, null,
+                (JCRCallback<Void>) systemSession -> {
+                    write.apply(systemSession.getNodeByIdentifier(taskId));
+                    systemSession.save();
+                    return null;
+                });
+    }
+
+    /**
+     * Re-reads the task through the caller's own session after an elevated write, so the mutation's
+     * return value reflects the new state (the user session's item cache still holds the
+     * pre-write values) and is still subject to the caller's own read permissions.
+     */
+    private static GqlTaskBoard refreshed(JCRSessionWrapper session, String id) throws RepositoryException {
+        session.refresh(false);
+        return new GqlTaskBoard(session.getNodeByIdentifier(id));
     }
 
     /**
