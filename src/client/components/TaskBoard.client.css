@@ -290,6 +290,38 @@
     min-width: 0;
 }
 
+/* The panel's tab strip (#61). Padded to the header's own inset so the tabs line up with the title
+   above them, and given the same rule below it that the header carries above. */
+.task-board__preview-tabs {
+    padding: 0 var(--spacing-medium);
+    border-bottom: 1px solid var(--color-gray_light);
+    flex: 0 0 auto;
+}
+
+/* One tabpanel per tab. All four are MOUNTED at once (see the comment in TaskPreviewPanel.tsx --
+   the iframe must survive a tab switch) and the inactive ones carry the `hidden` attribute; the
+   explicit display:none is required because the flex rule below would otherwise beat the UA's
+   `[hidden] {display: none}` on specificity. */
+.task-board__preview-tabpanel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--spacing-medium);
+    gap: var(--spacing-medium);
+}
+
+.task-board__preview-tabpanel[hidden] {
+    display: none;
+}
+
+/* The preview frame's own panel is the one that must NOT have padding: the iframe is full-bleed. */
+.task-board__preview-tabpanel--frame {
+    padding: 0;
+    overflow: hidden;
+}
+
 /* flex + min-height:0 so the frame takes the panel's whole remaining height rather than the
    150px an <iframe> is intrinsically sized at. */
 .task-board__preview-frame {
@@ -297,4 +329,86 @@
     min-height: 0;
     width: 100%;
     border: 0;
+}
+
+/* The Details tab: a two-column description list, label then value. `auto` on the first column
+   (not a fixed width) keeps the labels from being clipped in a language whose words are longer
+   than English's -- the value column absorbs the difference. */
+.task-board__preview-details {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--spacing-nano) var(--spacing-medium);
+    margin: 0;
+}
+
+.task-board__preview-label {
+    margin: 0;
+    /* The label is a caption beside body text; keep it from being dragged onto the value's
+       baseline when the value wraps to two lines. */
+    align-self: start;
+}
+
+.task-board__preview-value {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--spacing-small);
+    margin: 0;
+    /* Paths and UUIDs are long, unbreakable-looking strings; wrap them rather than widening the
+       grid past the panel. */
+    overflow-wrap: anywhere;
+}
+
+/* The Usages and History tabs share one list shape. */
+.task-board__preview-list,
+.task-board__preview-sections {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+}
+
+.task-board__preview-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+}
+
+.task-board__preview-items {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.task-board__preview-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding-bottom: var(--spacing-small);
+    border-bottom: 1px solid var(--color-gray_light);
+    overflow-wrap: anywhere;
+}
+
+.task-board__preview-item:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+.task-board__preview-count {
+    margin: 0;
+}
+
+/* Same treatment the board's target link gets, so a reference row reads as clickable in the same
+   way the row's own target does. */
+.task-board__preview-link {
+    color: var(--color-accent_dark120, var(--color-accent));
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.task-board__preview-link:hover {
+    text-decoration: underline;
 }

@@ -1,6 +1,6 @@
 import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {AddComment, Banner, Button, Chip, Close, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, MoreVert, OpenInNew, Paper, Search, Separator, Switch, Tab, TabItem, Textarea, Typography, Visibility} from '@jahia/moonstone';
+import {AddComment, Banner, Button, Chip, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, MoreVert, OpenInNew, Search, Separator, Switch, Tab, TabItem, Textarea, Typography, Visibility} from '@jahia/moonstone';
 // Type-only, so nothing is imported at runtime from this subpath: the DataTable *component* comes
 // from the package root above (moonstone re-exports it there), but its column/sort types are only
 // published under the './DataTable' export condition.
@@ -36,6 +36,9 @@ import {
 import type {ChipColor, TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
 import {priorityLabel, stateLabel, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
+import TaskPreviewPanel from './TaskPreviewPanel';
+import type {PreviewTarget} from './TaskPreviewPanel';
+import {languageOfRenderUrl, toContentLanguage} from './taskPreview.shared';
 import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -236,17 +239,13 @@ type TaskActionRequest = {
     taskDataComment?: {id: string; comment: string};
 };
 
-// What a row's "Preview" action asks the board to show in its side panel: everything the panel
-// renders, resolved once by the row that opened it. The panel never looks the task up again, which
-// is what lets it keep showing what it was opened on while the board reloads underneath it.
-type PreviewTarget = {
-    // The target page's own title -- what the panel is actually showing.
-    title: string;
-    // The task the preview was opened from, kept beside the page title so the panel still says
-    // which piece of work this content is being looked at for.
-    taskTitle: string;
-    url: string;
-};
+// What a row's "Preview" action asks the board to show in its side panel is PreviewTarget, defined
+// beside the panel that consumes it (./TaskPreviewPanel) rather than here: since #61 it carries the
+// previewed node's uuid/path/language too, which only that component's tabs read.
+//
+// A ROW supplies everything but the language, which is not a property of the row at all: it is the
+// language the preview is being looked at in, resolved once by the board (see handlePreview).
+type PreviewRequest = Omit<PreviewTarget, 'language'>;
 
 type TaskRowActionsProps = {
     task: TaskBoardNode;
@@ -257,7 +256,7 @@ type TaskRowActionsProps = {
     commentDrafts: MutableRefObject<Map<string, string>>;
     onAction: (request: TaskActionRequest) => void;
     onOpenComment: (taskId: string) => void;
-    onPreview: (target: PreviewTarget) => void;
+    onPreview: (target: PreviewRequest) => void;
 };
 
 // Same state/ownership rules as before, and the same server-side truth: what changed here is only
@@ -437,8 +436,9 @@ function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOp
     // one-click-eligible). Preview is a read-only look at the content and is exactly what a
     // reviewer needs BEFORE deciding anything, so gating it on a state they first have to claim
     // their way into put it behind the very clicks it exists to save.
-    if (targetUrl) {
-        const targetTitle = task.targetNode?.property?.value;
+    if (targetUrl && task.targetNode) {
+        const targetNode = task.targetNode;
+        const targetTitle = targetNode.property?.value;
         const taskTitle = task.title ?? t('common.untitledTask', 'Untitled task');
         menuItems.push(
             <MenuItem
@@ -448,7 +448,9 @@ function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOp
                 onClick={closeThen(() => onPreview({
                     title: targetTitle ?? taskTitle,
                     taskTitle,
-                    url: targetUrl
+                    url: targetUrl,
+                    uuid: targetNode.uuid,
+                    path: targetNode.path
                 }))}
             />,
             <MenuItem
@@ -580,84 +582,6 @@ function TaskCommentEditor({taskId, initialValue, drafts, isDisabled}: Readonly<
                 drafts.current.set(taskId, event.target.value);
             }}
         />
-    );
-}
-
-type TaskPreviewPanelProps = {
-    target: PreviewTarget;
-    onClose: () => void;
-};
-
-// The "Preview" side panel, mirroring jcontent's: its previewAction selects the node into a side
-// panel shown beside the content list rather than navigating away from it. None of that is
-// importable (it runs through jcontent's redux store, its renderedContent GraphQL query and its
-// own viewer registry), so this is the same UX shape rebuilt small: the target page, at the very
-// URL the "Preview in a new tab" action opens, in an iframe.
-//
-// Moonstone 2.20.3 does export a Drawer, and it is NOT what this needs: it is layout-only -- a
-// Paper with height:-webkit-fill-available, meant to be a column inside a flex layout -- with no
-// positioning, no animation and no dismissal of its own, and it does not forward Paper's
-// hasPadding, which a full-bleed iframe wants. Built on Paper directly instead, which is what
-// Drawer is anyway, so the panel still carries the dashboard's own surface tokens.
-function TaskPreviewPanel({target, onClose}: Readonly<TaskPreviewPanelProps>) {
-    const {t} = useTasksTranslation();
-    const label = t('board.preview.label', 'Content preview');
-    const closeLabel = t('board.preview.close', 'Close preview');
-
-    // Listened for on the document, not on the panel: this panel is deliberately not modal (the
-    // board behind it stays scrollable and clickable, which is the point of previewing beside the
-    // worklist), so by the time the reviewer wants it gone their focus is usually back in the
-    // table. A row menu's own Escape handler stops the event before it reaches here, so one
-    // Escape never closes both.
-    useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onClose();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown);
-        return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [onClose]);
-
-    return (
-        <Paper
-            hasPadding={false}
-            className="task-board__preview"
-            role="dialog"
-            // Deliberately no aria-modal: nothing behind this panel is inert, and claiming
-            // otherwise would tell a screen reader the rest of the board is unavailable.
-            aria-label={label}
-        >
-            <div className="task-board__preview-header">
-                <div className="task-board__preview-titles">
-                    <Typography component="h2" variant="subheading" weight="semiBold">{target.title}</Typography>
-                    <Typography component="p" variant="caption" weight="light" className="task-board__meta">
-                        {t('board.preview.task', 'Task: {{title}}', {title: target.taskTitle})}
-                    </Typography>
-                </div>
-                <Button
-                    // The panel opens from a menu item that unmounts with the menu, so focus would
-                    // otherwise be left on a detached node: it is moved onto the one control that
-                    // dismisses the thing that just appeared.
-                    autoFocus
-                    icon={<Close/>}
-                    variant="ghost"
-                    aria-label={closeLabel}
-                    title={closeLabel}
-                    onClick={onClose}
-                />
-            </div>
-            {/* Keyed by URL so swapping to another row's preview mounts a fresh frame instead of
-                navigating this one -- which would otherwise build up a back-history inside the
-                panel that nothing exposes a way to walk. */}
-            <iframe
-                key={target.url}
-                className="task-board__preview-frame"
-                src={target.url}
-                title={label}
-            />
-        </Paper>
     );
 }
 
@@ -920,7 +844,16 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     }, [graphqlEndpoint, currentPage, loadPage, t]);
 
     const handleOpenComment = useCallback((taskId: string) => setOpenCommentTaskId(taskId), []);
-    const handlePreview = useCallback((target: PreviewTarget) => setPreviewTarget(target), []);
+    // The panel's three data tabs all query per LANGUAGE, and the honest answer to "which one" is
+    // the language the iframe beside them is rendering: the target URL's own language segment,
+    // which the server built (GqlTaskBoard#getTargetNode resolves it through a session that has a
+    // locale, precisely so this segment is right). The viewer's UI locale is the fallback, reduced
+    // to a bare language code -- Jahia stores translations per language, so "fr-FR" would ask for
+    // a translation node that a site declaring plain "fr" does not have.
+    const handlePreview = useCallback((target: PreviewRequest) => setPreviewTarget({
+        ...target,
+        language: languageOfRenderUrl(target.url) ?? toContentLanguage(language ?? locale)
+    }), [language, locale]);
     const handleClosePreview = useCallback(() => setPreviewTarget(null), []);
 
     const rows: TaskRow[] = useMemo(() => connection.edges.map(edge => ({
@@ -1157,7 +1090,13 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                     {/* Outside .task-board__content on purpose: that element is the board's own scroll
                         container (overflow on both axes), and this panel is pinned to the viewport
                         rather than to the table it floats over. */}
-                    {previewTarget && <TaskPreviewPanel target={previewTarget} onClose={handleClosePreview}/>}
+                    {previewTarget && (
+                        <TaskPreviewPanel
+                            target={previewTarget}
+                            graphqlEndpoint={graphqlEndpoint}
+                            onClose={handleClosePreview}
+                        />
+                    )}
                 </>
             )}
         />

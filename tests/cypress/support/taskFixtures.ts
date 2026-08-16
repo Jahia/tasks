@@ -28,7 +28,9 @@ export type TaskBoardRow = {
     possibleOutcomeDetails: Array<{name: string; displayLabel: string}>;
     workflowSummary: string | null;
     simpleWorkflowTaskData: {id: string; comment: string | null} | null;
-    targetNode: {url: string; property: {value: string} | null} | null;
+    // uuid/path are what the board's preview side panel queries its Details, Usages and History
+    // tabs on (#61) -- see PreviewTarget in src/client/components/TaskPreviewPanel.tsx.
+    targetNode: {url: string; uuid: string; path: string; property: {value: string} | null} | null;
 };
 
 export type TaskBoardPage = {

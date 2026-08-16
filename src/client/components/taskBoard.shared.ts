@@ -96,6 +96,11 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             }
             targetNode {
                 url
+                # uuid/path are what the preview side panel's Details, Usages and History tabs
+                # query on (#61) -- two scalars off a node the row already resolves, rather than a
+                # second round trip when the panel opens.
+                uuid
+                path
                 property(name: "jcr:title") {
                     value
                 }
@@ -243,7 +248,7 @@ export type TaskBoardNode = {
     // The jnt:simpleWorkflow child carrying the reviewer's comment, when this task has one; null
     // for every plain task and for any other taskData node type.
     simpleWorkflowTaskData: {id: string; comment: string | null} | null;
-    targetNode: {url: string; property: {value: string} | null} | null;
+    targetNode: {url: string; uuid: string; path: string; property: {value: string} | null} | null;
 };
 
 export type TaskBoardConnection = {

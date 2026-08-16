@@ -90,7 +90,68 @@
     "preview": {
       "label": "Prévisualisation du contenu",
       "close": "Fermer la prévisualisation",
-      "task": "Tâche : {{title}}"
+      "task": "Tâche : {{title}}",
+      "tabs": {
+        "label": "Sections de la prévisualisation",
+        "details": "Détails",
+        "usages": "Utilisations",
+        "history": "Historique"
+      },
+      "details": {
+        "unavailable": "Ce contenu n'est plus disponible.",
+        "name": "Nom",
+        "type": "Type de contenu",
+        "path": "Chemin",
+        "uuid": "UUID",
+        "language": "Langue",
+        "created": "Créé le",
+        "createdBy": "Créé par",
+        "lastModified": "Dernière modification",
+        "lastModifiedBy": "Modifié par",
+        "publication": "État de publication",
+        "workInProgress": "Travail en cours",
+        "locked": "Verrouillé"
+      },
+      "publication": {
+        "published": "Publié",
+        "modified": "Modifié",
+        "notPublished": "Non publié",
+        "unpublished": "Dépublié",
+        "mandatoryLanguageUnpublishable": "Bloqué par une langue obligatoire",
+        "mandatoryLanguageValid": "Langues obligatoires complètes",
+        "liveModified": "Modifié en live",
+        "liveOnly": "Uniquement en live",
+        "conflict": "Conflit",
+        "deleted": "Supprimé",
+        "markedForDeletion": "Marqué pour suppression"
+      },
+      "usages": {
+        "empty": "Aucun autre contenu ne référence celui-ci.",
+        "count": "{{count}} référence",
+        "count_plural": "{{count}} références"
+      },
+      "history": {
+        "workflowTitle": "Workflow",
+        "contentTitle": "Modifications du contenu",
+        "noWorkflow": "Aucun workflow n'a été exécuté sur ce contenu.",
+        "noChanges": "Aucune modification enregistrée.",
+        "workflow": "Workflow",
+        "step": "Étape",
+        "started": "{{workflow}} démarré par {{user}} le {{date}}",
+        "by": "par {{user}}",
+        "on": "le {{date}}",
+        "running": "En cours",
+        "completed": "Terminé",
+        "change": "{{user}}, {{date}}",
+        "actions": {
+          "created": "Créé",
+          "added": "Ajouté",
+          "updated": "Mis à jour",
+          "removed": "Supprimé",
+          "published": "Publié",
+          "unpublished": "Dépublié"
+        }
+      }
     },
     "meta": {
       "createdBy": "Créée par : {{creator}}, le {{date}}",

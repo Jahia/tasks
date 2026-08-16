@@ -17,18 +17,28 @@ import java.util.Date;
  * or a completed {@code HistoryWorkflowTask}'s history entry with an outcome. Mirrors what
  * taskSchedule.jsp reads directly off those two object types via the workflow:workflow /
  * workflow:workflowHistory taglibs.
+ *
+ * <p>{@code name} and {@code user} were added for the board's preview panel (#61) and are purely
+ * additive: every field this type had is unchanged, so the existing consumers (the jnt:taskSchedule
+ * view and tests/cypress/fixtures/graphql/workflowActivity.query.graphql) select the same shape
+ * they always did.
  */
 @GraphQLDescription("A live workflow activity entry: either an active task with a due date, or a completed "
         + "task's history entry with an outcome")
 public class GqlWorkflowActivityTask {
 
     private final String label;
+    private final String stepName;
+    private final String user;
     private final Date dueDate;
     private final Date endTime;
     private final String targetNodeId;
 
-    GqlWorkflowActivityTask(String label, Date dueDate, Date endTime, String targetNodeId) {
+    GqlWorkflowActivityTask(String label, String stepName, String user, Date dueDate, Date endTime,
+            String targetNodeId) {
         this.label = label;
+        this.stepName = stepName;
+        this.user = user;
         this.dueDate = dueDate;
         this.endTime = endTime;
         this.targetNodeId = targetNodeId;
@@ -38,6 +48,23 @@ public class GqlWorkflowActivityTask {
     @GraphQLDescription("Display label: the task's display name if active, or its display outcome if from history")
     public String getLabel() {
         return label;
+    }
+
+    @GraphQLField
+    @GraphQLDescription("The workflow STEP this entry is about, as its display name (e.g. \"Review\") -- distinct "
+            + "from label, which for a history entry is the outcome rather than the step. Added for the board's "
+            + "preview panel (#61): the jBPM provider hardcodes a completed task's outcome to the literal string "
+            + "\"outcome\" (see GetHistoryWorkflowTasksCommand), so label alone cannot name what was completed.")
+    public String getName() {
+        return stepName;
+    }
+
+    @GraphQLField
+    @GraphQLDescription("Display name of the user this entry belongs to -- the step's actual owner for a history "
+            + "entry -- resolved from the engine's own value; the raw value when it doesn't resolve to a node this "
+            + "viewer can read. Null when the engine records none.")
+    public String getUser() {
+        return user;
     }
 
     @GraphQLField

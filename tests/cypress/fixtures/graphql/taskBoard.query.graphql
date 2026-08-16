@@ -53,6 +53,8 @@ query TaskBoard(
                 }
                 targetNode {
                     url
+                    uuid
+                    path
                     property(name: "jcr:title") {
                         value
                     }

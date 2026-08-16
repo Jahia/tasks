@@ -90,7 +90,68 @@
     "preview": {
       "label": "Inhaltsvorschau",
       "close": "Vorschau schließen",
-      "task": "Aufgabe: {{title}}"
+      "task": "Aufgabe: {{title}}",
+      "tabs": {
+        "label": "Vorschaubereiche",
+        "details": "Details",
+        "usages": "Verwendungen",
+        "history": "Verlauf"
+      },
+      "details": {
+        "unavailable": "Dieser Inhalt ist nicht mehr verfügbar.",
+        "name": "Name",
+        "type": "Inhaltstyp",
+        "path": "Pfad",
+        "uuid": "UUID",
+        "language": "Sprache",
+        "created": "Erstellt am",
+        "createdBy": "Erstellt von",
+        "lastModified": "Zuletzt geändert",
+        "lastModifiedBy": "Geändert von",
+        "publication": "Veröffentlichungsstatus",
+        "workInProgress": "In Bearbeitung",
+        "locked": "Gesperrt"
+      },
+      "publication": {
+        "published": "Veröffentlicht",
+        "modified": "Geändert",
+        "notPublished": "Nicht veröffentlicht",
+        "unpublished": "Zurückgezogen",
+        "mandatoryLanguageUnpublishable": "Durch eine Pflichtsprache blockiert",
+        "mandatoryLanguageValid": "Pflichtsprachen vollständig",
+        "liveModified": "In Live geändert",
+        "liveOnly": "Nur in Live",
+        "conflict": "Konflikt",
+        "deleted": "Gelöscht",
+        "markedForDeletion": "Zur Löschung vorgemerkt"
+      },
+      "usages": {
+        "empty": "Kein anderer Inhalt verweist auf diesen.",
+        "count": "{{count}} Verweis",
+        "count_plural": "{{count}} Verweise"
+      },
+      "history": {
+        "workflowTitle": "Workflow",
+        "contentTitle": "Inhaltsänderungen",
+        "noWorkflow": "Für diesen Inhalt wurde kein Workflow ausgeführt.",
+        "noChanges": "Keine erfassten Änderungen.",
+        "workflow": "Workflow",
+        "step": "Schritt",
+        "started": "{{workflow}} gestartet von {{user}} am {{date}}",
+        "by": "von {{user}}",
+        "on": "am {{date}}",
+        "running": "Läuft",
+        "completed": "Abgeschlossen",
+        "change": "{{user}}, {{date}}",
+        "actions": {
+          "created": "Erstellt",
+          "added": "Hinzugefügt",
+          "updated": "Aktualisiert",
+          "removed": "Entfernt",
+          "published": "Veröffentlicht",
+          "unpublished": "Zurückgezogen"
+        }
+      }
     },
     "meta": {
       "createdBy": "Erstellt von: {{creator}}, am {{date}}",

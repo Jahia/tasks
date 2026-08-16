@@ -1,11 +1,26 @@
-query WorkflowActivity($path: String!) {
-    workflowActivity(path: $path) {
+# Every field the two consumers of this query ask for: the jnt:taskSchedule view
+# (TaskScheduleView.server.tsx -- label/dueDate/endTime, no includeSelf) and the board's preview
+# panel (taskPreview.shared.ts -- processes/name/user, includeSelf: true). $includeSelf is optional
+# so a caller that omits it gets the descendants-only behaviour the schedule view relies on.
+query WorkflowActivity($path: String!, $includeSelf: Boolean) {
+    workflowActivity(path: $path, includeSelf: $includeSelf) {
+        processes {
+            name
+            startUser
+            startTime
+            endTime
+            isCompleted
+        }
         activeTasks {
             label
+            name
+            user
             dueDate
         }
         history {
             label
+            name
+            user
             endTime
         }
     }

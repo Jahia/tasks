@@ -56,3 +56,30 @@ export const TEST_PASSWORD = 'password123';
 // form jcr.mutateNode.startWorkflow expects; both halves confirmed against
 // WorkflowService#getWorkflows on the instance under test.
 export const PUBLICATION_WORKFLOW = 'jBPM:1-step-publication';
+
+/**
+ * A fixture node name that is unique to this run.
+ *
+ * <p><b>Why any of this is needed.</b> The run-level cleanup in support/e2e.ts deletes every test
+ * SITE, which is enough for everything that lives in the JCR. It is not enough for anything that
+ * starts a real workflow: the engine keeps its own process store, outside the repository, and
+ * indexes it by the process's {@code nodePath} VARIABLE (see GetHistoryWorkflowsForPathCommand,
+ * whose query is `FROM VariableInstanceLog WHERE variableId = 'nodePath' AND value LIKE ...`).
+ * Deleting the content does not delete those rows. So on a persistent instance -- which is exactly
+ * what the local docker bench is, being started and stopped rather than recreated -- a second run
+ * of a spec that starts a publication on a FIXED path finds the previous run's finished process
+ * still sitting in the engine's history, at the very path it is about to reuse.
+ *
+ * <p>That is not hypothetical: it is what made task-schedule-workflow's "empty while running"
+ * assertion fail on the second run (a just-started process cannot have an ENDED step, so the
+ * history entry it saw could only have come from an earlier run). Giving the target a per-run name
+ * makes the path itself new, which is the only thing that puts the engine's answer back under the
+ * spec's control -- and it keeps the assertion saying what it means ("this workflow declares no
+ * due-dated or completed steps yet") instead of being loosened to tolerate strangers.
+ *
+ * <p>Evaluated once per spec file, at import time; each spec runs in its own browser context, so
+ * two specs never share a value and never need to.
+ */
+export function runScopedName(base: string): string {
+    return `${base}-${Date.now()}`;
+}
