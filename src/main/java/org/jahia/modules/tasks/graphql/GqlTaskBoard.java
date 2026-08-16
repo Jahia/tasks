@@ -15,6 +15,7 @@ import org.jahia.services.usermanager.JahiaUserManagerService;
 import org.jahia.services.workflow.Workflow;
 import org.jahia.services.workflow.WorkflowService;
 import org.jahia.services.workflow.WorkflowTask;
+import org.jahia.utils.LanguageCodeConverters;
 import org.jahia.utils.i18n.JahiaLocaleContextHolder;
 import org.jahia.utils.i18n.Messages;
 
@@ -49,6 +50,10 @@ public class GqlTaskBoard {
     private static final String ROLE_ASSIGNEE = "assignee";
     private static final String ROLE_CANDIDATE = "candidate";
     private static final String ROLE_NONE = "none";
+
+    // The single child node jnt:task declares (see definitions.cnd) -- the workflow-specific form
+    // data attached to a task, e.g. a jnt:simpleWorkflow.
+    private static final String TASK_DATA_NODE = "taskData";
 
     private final JCRNodeWrapper node;
 
@@ -107,13 +112,33 @@ public class GqlTaskBoard {
             return title;
         }
         try {
-            JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
-            Locale locale = session.getLocale() != null ? session.getLocale() : JahiaLocaleContextHolder.getLocale();
-            String resolvedMacro = Messages.interpolateResourceBundleMacro(matcher.group(), locale, null);
+            String resolvedMacro = Messages.interpolateResourceBundleMacro(matcher.group(), resolveLocale(null), null);
             return title.substring(0, matcher.start()) + resolvedMacro + title.substring(matcher.end());
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve task title", e);
         }
+    }
+
+    /**
+     * The locale a stored label should be resolved in: what the caller explicitly asked for, else
+     * the request's own.
+     *
+     * <p>"The request's own" is two things, in order: the JCR session's locale, which is set when
+     * the board is rendered inside a localized page (the server-side render pass), and the ambient
+     * request locale otherwise -- a plain GraphQL POST from the client island opens a session with
+     * no locale at all, which is exactly the case {@link JahiaLocaleContextHolder} covers. Same
+     * chain {@link #getTitle()} has always used, so a row's title and its outcome labels can never
+     * come back in two different languages.
+     */
+    private static Locale resolveLocale(String language) throws RepositoryException {
+        if (language != null && !language.isEmpty()) {
+            Locale requested = LanguageCodeConverters.languageCodeToLocale(language);
+            if (requested != null) {
+                return requested;
+            }
+        }
+        JCRSessionWrapper session = JCRSessionFactory.getInstance().getCurrentUserSession(Constants.EDIT_WORKSPACE);
+        return session.getLocale() != null ? session.getLocale() : JahiaLocaleContextHolder.getLocale();
     }
 
     @GraphQLField
@@ -154,6 +179,92 @@ public class GqlTaskBoard {
     @GraphQLDescription("Outcomes this task can be completed with (workflow-specific; empty when none are declared)")
     public List<String> getPossibleOutcomes() {
         return readPossibleOutcomes(node);
+    }
+
+    @GraphQLField
+    @GraphQLDescription("The same outcomes as possibleOutcomes, in the same order, each with the label to display "
+            + "for it -- resolved from the workflow's own resource bundle, which is the only place those labels "
+            + "exist (\"accept\" is \"Publish\" in the one-step publication workflow, and something else entirely "
+            + "in another workflow). Empty when the task declares no outcomes.")
+    public List<GqlTaskOutcome> getPossibleOutcomeDetails(
+            @GraphQLName("language")
+            @GraphQLDescription("Language code to resolve the labels in (e.g. \"fr\", \"fr_FR\"). Omitting it, or "
+                    + "passing one that isn't a language code, resolves them in the request's own locale.")
+            String language) {
+        List<String> outcomes = readPossibleOutcomes(node);
+        if (outcomes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        try {
+            Locale locale = resolveLocale(language);
+            // Both are jnt:workflowTask properties, absent on a plain jnt:task -- which is also
+            // why every lookup below degrades to the raw outcome rather than erroring.
+            String taskBundle = node.getPropertyAsString("taskBundle");
+            String taskName = node.getPropertyAsString("taskName");
+            List<GqlTaskOutcome> details = new ArrayList<>();
+            for (String outcome : outcomes) {
+                details.add(new GqlTaskOutcome(outcome, resolveOutcomeLabel(taskBundle, taskName, outcome, locale)));
+            }
+            return details;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve task outcome labels", e);
+        }
+    }
+
+    /**
+     * The label a workflow declares for one of its own outcomes, mirroring what the legacy board
+     * did with {@code <utility:setBundle basename="${task.properties['taskBundle'].string}">}: look
+     * the key {@code <taskName>.<outcome>} up in the workflow's bundle, with every space in either
+     * part written as a dot (the bundles are keyed that way -- e.g. {@code review.accept} in
+     * org.jahia.modules.defaultmodule.1-step-publication).
+     *
+     * <p>Then the same two fallbacks it had, in the same order: a second lookup with the outcome
+     * lower-cased (the legacy JSP detected the first miss by testing for JSTL's "???key???"
+     * placeholder), and finally the raw outcome itself, capitalized -- which is all a plain
+     * jnt:task, or a workflow whose bundle has no entry for this outcome, can offer.
+     */
+    private static String resolveOutcomeLabel(String taskBundle, String taskName, String outcome, Locale locale) {
+        if (taskBundle != null && !taskBundle.isEmpty() && taskName != null && !taskName.isEmpty()) {
+            String keyPrefix = taskName.replace(' ', '.') + ".";
+            String label = Messages.get(taskBundle, keyPrefix + outcome.replace(' ', '.'), locale, null);
+            if (label == null) {
+                // Locale.ROOT, not the requested locale: this lower-cases a bundle KEY, and the
+                // key is the same ASCII string whoever is reading it (in a Turkish locale,
+                // "I".toLowerCase() is "ı", which no bundle is keyed on).
+                label = Messages.get(taskBundle,
+                        keyPrefix + outcome.toLowerCase(Locale.ROOT).replace(' ', '.'), locale, null);
+            }
+            if (label != null) {
+                return label;
+            }
+        }
+        return capitalize(outcome);
+    }
+
+    private static String capitalize(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        return value.substring(0, 1).toUpperCase(Locale.ROOT) + value.substring(1);
+    }
+
+    @GraphQLField
+    @GraphQLDescription("This task's jnt:simpleWorkflow taskData child -- the comment a reviewer can submit with "
+            + "their decision. Null when the task has no taskData child at all, or when that child is some other "
+            + "node type (a workflow-specific form this board has no editor for).")
+    public GqlSimpleWorkflowTaskData getSimpleWorkflowTaskData() {
+        try {
+            if (!node.hasNode(TASK_DATA_NODE)) {
+                return null;
+            }
+            JCRNodeWrapper taskData = node.getNode(TASK_DATA_NODE);
+            if (!taskData.isNodeType("jnt:simpleWorkflow")) {
+                return null;
+            }
+            return new GqlSimpleWorkflowTaskData(taskData.getIdentifier(), taskData.getPropertyAsString("jcr:title"));
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to read the task's workflow data", e);
+        }
     }
 
     @GraphQLField

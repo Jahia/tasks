@@ -21,6 +21,26 @@
     overflow-y: auto;
 }
 
+/* The scope tabs and the "Show finished" toggle share one row: the toggle narrows the same
+   listing the tabs do, so it belongs beside them rather than in the toolbar below. */
+.task-board__scopes {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+}
+
+.task-board__show-finished {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-small);
+}
+
+.task-board__show-finished label {
+    cursor: pointer;
+}
+
 .task-board__toolbar {
     display: flex;
     align-items: center;
@@ -87,4 +107,10 @@
    visually separated from the routine task-management actions above (Unassign/Suspend/Preview). */
 .task-board__actions-row--decisions {
     margin-top: var(--spacing-small);
+}
+
+/* The optional decision comment, revealed in place of its "Add a comment" button. Full cell width
+   (the Actions column is a fixed 280px) so the box doesn't shrink to a one-word slot. */
+.task-board__comment {
+    width: 100%;
 }

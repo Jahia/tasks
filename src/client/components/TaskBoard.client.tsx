@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {Banner, Button, Chip, DataTable, EmptyData, Header, Input, Loader, Search, Tab, TabItem, Typography} from '@jahia/moonstone';
+import {Banner, Button, Chip, DataTable, EmptyData, Header, Input, Loader, Search, Switch, Tab, TabItem, Textarea, Typography} from '@jahia/moonstone';
 // Type-only, so nothing is imported at runtime from this subpath: the DataTable *component* comes
 // from the package root above (moonstone re-exports it there), but its column/sort types are only
 // published under the './DataTable' export condition.
@@ -11,6 +11,7 @@ import type {DataTableColumn} from '@jahia/moonstone/DataTable';
 import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayout';
 import {callGraphQL} from '../lib/graphqlClient';
 import {
+    ALL_STATES,
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
     DEFAULT_SORT_BY,
@@ -26,6 +27,7 @@ import {
 } from './taskBoard.shared';
 import type {TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
 import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -47,6 +49,7 @@ const labels = {
     scopeAssignedToMe: 'Assigned to me',
     scopeClaimable: 'Available to my group(s)',
     scopeAll: 'All tasks',
+    showFinished: 'Show finished',
     searchLabel: 'Search:',
     searchPlaceholder: 'Search tasks...',
     untitledTask: 'Untitled task',
@@ -63,8 +66,9 @@ const labels = {
     actionSuspend: 'Suspend',
     actionResume: 'Resume',
     actionPreview: 'Preview',
-    outcomePublish: 'Publish',
-    outcomeReject: 'Reject publication',
+    actionComplete: 'Complete',
+    actionAddComment: 'Add a comment',
+    commentPlaceholder: 'Comment (optional)',
     waitingToday: 'today',
     waitingUnknown: 'unknown',
     taskCount: (count: number) => `${count} task(s)`,
@@ -220,6 +224,11 @@ type TaskBoardProps = {
     graphqlEndpoint: string;
     currentUserKey: string;
     canReviewAll: boolean;
+    // Language the server resolves outcome labels in. Passed down from whoever rendered the board
+    // (the SSR view knows the page's own locale), so the labels the island re-fetches match the
+    // ones it was handed. Omitted -- e.g. from the admin dashboard route, which has no server
+    // render pass -- the server falls back to the request's own locale.
+    language?: string;
 };
 
 // All three are offered to every viewer, reviewer or not. "All tasks" is not a reviewer-only
@@ -231,21 +240,12 @@ const SCOPE_OPTIONS: Array<{scope: TaskScope; label: string}> = [
     {scope: SCOPE_ALL, label: labels.scopeAll}
 ];
 
-// One button per outcome the task actually declares (workflow-specific --
-// see TaskBoardMutationExtensions#completeTask). Common synonyms get the
-// checklist's fixed labels; anything else falls back to its own raw label.
-function outcomeLabel(outcome: string): string {
-    const normalized = outcome.toLowerCase();
-    if (/publi|approve|accept|finish/.test(normalized)) {
-        return labels.outcomePublish;
-    }
-
-    if (/reject|refuse|deny|decline/.test(normalized)) {
-        return labels.outcomeReject;
-    }
-
-    return capitalize(outcome);
-}
+// Which outcome is the "decline" one, for ORDERING only (it goes first, matching the requested
+// layout, regardless of the order possibleOutcomes happens to declare them in). Matched against
+// the outcome's NAME, never its label: the label is localized server-side (see
+// GqlTaskBoard#getPossibleOutcomeDetails), so an English pattern would only recognize it in
+// English, while the name is a workflow-definition constant that never changes with the locale.
+const REJECT_OUTCOME_PATTERN = /reject|refuse|deny|decline/i;
 
 // "2026-07-20T11:39:20.123Z" -> "July 20, 2026". Formatted client-side (rather than baking a fixed
 // locale into the server's ISO-8601 getCreatedDate()) so it can follow the viewer's own locale
@@ -268,9 +268,21 @@ function formatCreatedDate(iso: string | null): string | null {
 }
 
 type MenuAction = {
+    // Own identity, rather than reusing the mutation name as the React key: two actions in the
+    // same row can now share a mutation (every outcome of a workflow task runs completeTask).
+    key: string;
     label: string;
     mutation: string;
     variables: {id: string} & Record<string, unknown>;
+};
+
+// What one click on a row action asks the board to run. The optional comment is written first, in
+// its own mutation, and only when the reviewer actually typed one -- the same two-step the legacy
+// board did (its sendNewStatus() submitted the taskData form, then posted the state change).
+type TaskActionRequest = {
+    mutation: string;
+    variables: Record<string, unknown>;
+    taskDataComment?: {id: string; comment: string};
 };
 
 type TaskActionsProps = {
@@ -278,7 +290,7 @@ type TaskActionsProps = {
     currentUserKey: string;
     canReviewAll: boolean;
     isBusy: boolean;
-    onAction: (mutation: string, variables: Record<string, unknown>) => void;
+    onAction: (request: TaskActionRequest) => void;
 };
 
 // Same state/ownership rules as before this component's redesign -- just rendered as visible,
@@ -286,6 +298,12 @@ type TaskActionsProps = {
 // independently re-checks every one of these server-side and is the real security boundary; a
 // wrong guess here just surfaces as an error banner.
 function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
+    // The stored comment is the starting value of the box, and the yardstick for "did the reviewer
+    // change anything": the workflow engine pre-fills it with the process summary, so it is
+    // normally non-empty and must not be re-saved untouched on every decision.
+    const storedComment = task.simpleWorkflowTaskData?.comment ?? '';
+    const [comment, setComment] = useState(storedComment);
+    const [isCommentOpen, setCommentOpen] = useState(false);
     const canAct = task.owner === currentUserKey || canReviewAll;
     const targetUrl = task.targetNode?.url;
     // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
@@ -301,45 +319,75 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     let showPreview = false;
 
     if (task.state === 'active' && isUnassigned) {
-        primaryActions.push({label: labels.actionAssignToMe, mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
+        primaryActions.push({key: 'assign', label: labels.actionAssignToMe, mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
     } else if (canAct && task.state === 'active') {
         // Assigned, not started yet.
         primaryActions.push(
-            {label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {label: labels.actionStart, mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
+            {key: 'unassign', label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {key: 'start', label: labels.actionStart, mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
         );
     } else if (canAct && task.state === 'started') {
         primaryActions.push(
-            {label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {label: labels.actionSuspend, mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
+            {key: 'unassign', label: labels.actionUnassign, mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
+            {key: 'suspend', label: labels.actionSuspend, mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
         );
         showPreview = true;
-        // Reject publication before Publish, matching the requested layout order, regardless of
-        // the order possibleOutcomes happens to list them in (workflow-definition-specific).
-        const outcomes = task.possibleOutcomes
-            .map(outcome => ({outcome, label: outcomeLabel(outcome)}))
-            .sort((a, b) => Number(a.label !== labels.outcomeReject) - Number(b.label !== labels.outcomeReject));
-        for (const {outcome, label} of outcomes) {
-            decisionActions.push({label, mutation: COMPLETE_TASK_MUTATION, variables: {id: task.id, outcome}});
+        // Reject before accept, matching the requested layout order, regardless of the order the
+        // workflow happens to declare its outcomes in -- see REJECT_OUTCOME_PATTERN for why this
+        // reads the outcome's name and the button reads its label.
+        const outcomes = [...task.possibleOutcomeDetails]
+            .sort((a, b) => Number(!REJECT_OUTCOME_PATTERN.test(a.name)) - Number(!REJECT_OUTCOME_PATTERN.test(b.name)));
+        for (const outcome of outcomes) {
+            decisionActions.push({
+                key: outcome.name,
+                label: outcome.displayLabel,
+                mutation: COMPLETE_TASK_MUTATION,
+                variables: {id: task.id, outcome: outcome.name}
+            });
+        }
+
+        if (decisionActions.length === 0) {
+            // A task with no declared outcomes is a manual one (a plain jnt:task, or a workflow
+            // task whose step declares none): there is no decision to record, just "this is done".
+            // Legacy offered it as a "completed" checkbox; completeTask can't serve it (it demands
+            // a declared outcome), so this is the same generic state transition the task detail
+            // view's own Complete button makes -- authorized server-side by updateTaskState's
+            // owner-or-reviewer check, exactly like every other action here.
+            decisionActions.push({
+                key: 'complete',
+                label: labels.actionComplete,
+                mutation: UPDATE_TASK_STATE_MUTATION,
+                variables: {id: task.id, state: 'finished'}
+            });
         }
     } else if (canAct && task.state === 'suspended') {
-        primaryActions.push({label: labels.actionResume, mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
+        primaryActions.push({key: 'resume', label: labels.actionResume, mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
     }
 
     if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
         return <Typography variant="caption" weight="light">{labels.noActions}</Typography>;
     }
 
+    const taskData = task.simpleWorkflowTaskData;
+    // Only sent when it actually differs from what's stored -- an untouched (or never-opened) box
+    // must not overwrite the node with the value it already holds.
+    const commentUpdate = () => (taskData && comment !== storedComment ? {id: taskData.id, comment} : undefined);
+    const runDecision = (action: MenuAction) => onAction({
+        mutation: action.mutation,
+        variables: action.variables,
+        taskDataComment: commentUpdate()
+    });
+
     return (
         <div className="task-board__actions">
             <div className="task-board__actions-row">
                 {primaryActions.map(action => (
                     <Button
-                        key={action.mutation}
+                        key={action.key}
                         label={action.label}
                         size="small"
                         isDisabled={isBusy}
-                        onClick={() => onAction(action.mutation, action.variables)}
+                        onClick={() => onAction({mutation: action.mutation, variables: action.variables})}
                     />
                 ))}
                 {showPreview && targetUrl && (
@@ -352,16 +400,39 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
                     />
                 )}
             </div>
+            {taskData && decisionActions.length > 0 && (
+                <div className="task-board__actions-row">
+                    {isCommentOpen ? (
+                        <Textarea
+                            className="task-board__comment"
+                            value={comment}
+                            rows={3}
+                            isDisabled={isBusy}
+                            placeholder={labels.commentPlaceholder}
+                            aria-label={labels.commentPlaceholder}
+                            onChange={event => setComment(event.target.value)}
+                        />
+                    ) : (
+                        <Button
+                            label={labels.actionAddComment}
+                            size="small"
+                            variant="ghost"
+                            isDisabled={isBusy}
+                            onClick={() => setCommentOpen(true)}
+                        />
+                    )}
+                </div>
+            )}
             {decisionActions.length > 0 && (
                 <div className="task-board__actions-row task-board__actions-row--decisions">
                     {decisionActions.map(action => (
                         <Button
-                            key={String(action.variables.outcome)}
+                            key={action.key}
                             label={action.label}
                             size="small"
                             color="accent"
                             isDisabled={isBusy}
-                            onClick={() => onAction(action.mutation, action.variables)}
+                            onClick={() => runDecision(action)}
                         />
                     ))}
                 </div>
@@ -424,7 +495,7 @@ function TaskCell({task, showCandidates}: Readonly<TaskCellProps>) {
     );
 }
 
-export default function TaskBoard({initialConnection, initialScope, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
+export default function TaskBoard({initialConnection, initialScope, graphqlEndpoint, currentUserKey, canReviewAll, language}: Readonly<TaskBoardProps>) {
     const [currentPage, setCurrentPage] = useState(1);
     const [connection, setConnection] = useState(initialConnection);
     const [isLoading, setLoading] = useState(false);
@@ -432,6 +503,9 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
     const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
     const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_PAGE_SIZE);
     const [scope, setScope] = useState<TaskScope>(initialScope);
+    // Off by default: the board is a worklist, and terminal tasks are only ever looked up
+    // deliberately. The initial page this component was handed was fetched with it off too.
+    const [showFinished, setShowFinished] = useState(false);
     // searchInput is what the box shows on every keystroke; search is the debounced value
     // that actually goes into the query (see SEARCH_DEBOUNCE_MS above).
     const [searchInput, setSearchInput] = useState('');
@@ -466,8 +540,9 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                 after: cursorsByPage.current.get(page),
                 search: search === '' ? null : search,
                 ...toSortArgument(sortColumn, sortDirection),
-                filterState: NOT_FINISHED_STATES,
-                scope
+                filterState: showFinished ? ALL_STATES : NOT_FINISHED_STATES,
+                scope,
+                language: language ?? null
             });
             setConnection(data.taskBoard);
             setCurrentPage(page);
@@ -476,12 +551,12 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search, sortColumn, sortDirection, scope]);
+    }, [graphqlEndpoint, itemsPerPage, search, sortColumn, sortDirection, scope, showFinished, language]);
 
-    // itemsPerPage/search/sort/scope all change what the *first* page even means, so none of them
-    // can be applied by just re-fetching the current page -- every cached cursor is invalidated and
-    // this always jumps back to page 1. Skipped on mount: initialConnection already is page 1 of
-    // initialScope at the (unchanged) defaults.
+    // itemsPerPage/search/sort/scope/showFinished all change what the *first* page even means, so
+    // none of them can be applied by just re-fetching the current page -- every cached cursor is
+    // invalidated and this always jumps back to page 1. Skipped on mount: initialConnection already
+    // is page 1 of initialScope at the (unchanged) defaults.
     const isInitialMount = useRef(true);
     useEffect(() => {
         if (isInitialMount.current) {
@@ -491,10 +566,10 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
 
         cursorsByPage.current = new Map([[1, undefined]]);
         loadPage(1);
-        // Deliberately reacts only to the five inputs that redefine page 1: loadPage already
+        // Deliberately reacts only to the six inputs that redefine page 1: loadPage already
         // closes over all of them (declared above) plus graphqlEndpoint/currentPage, which this
         // effect doesn't care about.
-    }, [itemsPerPage, search, sortColumn, sortDirection, scope]);
+    }, [itemsPerPage, search, sortColumn, sortDirection, scope, showFinished]);
 
     const handlePageChange = (nextPage: number) => {
         // Clamp forward jumps to one page at a time -- see the cursor cache
@@ -517,10 +592,21 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         setSortDirection(direction);
     }, []);
 
-    const handleAction = useCallback(async (mutation: string, variables: Record<string, unknown>) => {
+    const handleAction = useCallback(async ({mutation, variables, taskDataComment}: TaskActionRequest) => {
         setBusyTaskId(String(variables.id));
         setError(null);
         try {
+            if (taskDataComment) {
+                // Before the decision, never after: completing a workflow task hands control back
+                // to the workflow engine, which may move the task (and its taskData child) out of
+                // reach -- so a comment saved afterwards could have nowhere left to land. Its
+                // failure aborts the decision too, rather than silently completing without it.
+                await callGraphQL(graphqlEndpoint, UPDATE_TASK_DATA_TITLE_MUTATION, {
+                    id: taskDataComment.id,
+                    title: taskDataComment.comment
+                });
+            }
+
             await callGraphQL(graphqlEndpoint, mutation, variables);
             await loadPage(currentPage);
         } catch (e) {
@@ -628,16 +714,29 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             )}
             content={(
                 <div className="task-board__content">
-                    <Tab>
-                        {SCOPE_OPTIONS.map(option => (
-                            <TabItem
-                                key={option.scope}
-                                label={option.label}
-                                isSelected={scope === option.scope}
-                                onClick={() => setScope(option.scope)}
+                    <div className="task-board__scopes">
+                        <Tab>
+                            {SCOPE_OPTIONS.map(option => (
+                                <TabItem
+                                    key={option.scope}
+                                    label={option.label}
+                                    isSelected={scope === option.scope}
+                                    onClick={() => setScope(option.scope)}
+                                />
+                            ))}
+                        </Tab>
+                        <div className="task-board__show-finished">
+                            <Switch
+                                id="task-board-show-finished"
+                                checked={showFinished}
+                                isDisabled={isLoading}
+                                onChange={() => setShowFinished(current => !current)}
                             />
-                        ))}
-                    </Tab>
+                            <label htmlFor="task-board-show-finished">
+                                <Typography component="span" variant="body">{labels.showFinished}</Typography>
+                            </label>
+                        </div>
+                    </div>
                     <div className="task-board__toolbar">
                         <Typography variant="caption" weight="light">{labels.taskCount(connection.pageInfo.totalCount)}</Typography>
                         <div className="task-board__search">

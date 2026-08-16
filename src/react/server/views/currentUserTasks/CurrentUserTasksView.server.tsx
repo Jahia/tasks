@@ -16,14 +16,27 @@ jahiaComponent(
         // Higher than the module's legacy .jsp default view, so this one wins.
         priority: 10
     },
-    () => {
+    (props, {renderContext}) => {
+        // The language the workflow decision labels come back in (see
+        // GqlTaskBoard#getPossibleOutcomeDetails). The UI locale, not the rendered content's:
+        // "Publish" / "Reject publication" are interface labels on a back-office screen, so they
+        // follow the viewer's own language like the rest of the admin UI, not the language of the
+        // page a task happens to be about. Sent explicitly rather than left to the server's own
+        // fallback, so the rows the island re-fetches (a plain POST, with no page context at all)
+        // stay in the same language as the ones rendered here.
+        //
+        // Typed non-null, but core returns null for a guest with no main resource
+        // (RenderContext#getUILocale) -- and the argument is optional, so "no language" is a
+        // supported answer here, not something to crash the whole view over.
+        const uiLocale = renderContext.getUILocale();
+        const language = uiLocale ? uiLocale.getLanguage() : undefined;
         // Fetched here (SSR) rather than in the client island: useGQLQuery and
         // buildEndpointUrl are part of @jahia/javascript-modules-library, which
         // the client bundle is forbidden from importing at all. The island
         // fetches every subsequent page/mutation itself via plain fetch().
         const {data, errors} = useGQLQuery({
             query: INITIAL_TASK_BOARD_QUERY,
-            variables: {first: PAGE_SIZE, filterState: NOT_FINISHED_STATES, sortBy: DEFAULT_SORT_BY, sortOrder: DEFAULT_SORT_ORDER}
+            variables: {first: PAGE_SIZE, filterState: NOT_FINISHED_STATES, sortBy: DEFAULT_SORT_BY, sortOrder: DEFAULT_SORT_ORDER, language}
         });
 
         if (errors && errors.length > 0) {
@@ -45,7 +58,8 @@ jahiaComponent(
                         initialScope,
                         graphqlEndpoint: buildEndpointUrl('/modules/graphql'),
                         currentUserKey: result.taskBoardCurrentUserKey,
-                        canReviewAll: result.taskBoardCanReviewAll
+                        canReviewAll: result.taskBoardCanReviewAll,
+                        language
                     }}
                 />
             </div>

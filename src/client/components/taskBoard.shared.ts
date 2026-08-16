@@ -15,6 +15,15 @@
 // complete, neutral listing endpoint -- every call site here just opts into this narrower view.
 export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
 
+// What the board's "Show finished" toggle widens filterState to. It adds BOTH terminal states,
+// not just "finished": "cancelled" is the other end a task can stop at (jnt:task's own choicelist
+// declares it, and the task detail view's Cancel button writes it -- see
+// TaskBoardMutationExtensions#ALLOWED_STATES), and it is excluded from NOT_FINISHED_STATES
+// exactly as "finished" is. With only "finished" added here, a cancelled task would be
+// unreachable from this board in either position of the toggle, which is a worse answer than a
+// toggle whose label names the state reviewers actually look for.
+export const ALL_STATES = [...NOT_FINISHED_STATES, 'finished', 'cancelled'];
+
 // The board's own default sort: newest created first (jahia-private#5292), which is also the
 // server's own documented default (TaskBoardQueryExtensions#DEFAULT_SORT_PROPERTY). Sent
 // explicitly all the same, so the very first render already matches what the table's sorted
@@ -56,11 +65,18 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             owner
             assigneeDisplayName
             state
-            possibleOutcomes
+            possibleOutcomeDetails(language: $language) {
+                name
+                displayLabel
+            }
             description
             workflowSummary
             viewerRole
             candidateDisplayNames
+            simpleWorkflowTaskData {
+                id
+                comment
+            }
             targetNode {
                 url
                 property(name: "jcr:title") {
@@ -72,7 +88,7 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
 `;
 
 export const TASK_BOARD_QUERY = /* GraphQL */ `
-    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String) {
+    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String, $language: String) {
         taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState, scope: $scope) {
             ${TASK_BOARD_PAGE_SELECTION}
         }
@@ -90,7 +106,7 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 // pages (#64), each proportional to the page size and not to the size of the board -- and the two
 // added ones are the narrow scopes, which are usually the smallest.
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
-    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String) {
+    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $language: String) {
         assignedToMe: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${SCOPE_ASSIGNED_TO_ME}") {
             ${TASK_BOARD_PAGE_SELECTION}
         }
@@ -145,6 +161,14 @@ export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
+// One completion decision a started task offers. displayLabel is resolved server-side, in the
+// workflow's own resource bundle (GqlTaskBoard#getPossibleOutcomeDetails) -- the client displays
+// it verbatim and never derives a label from the name itself.
+export type TaskBoardOutcome = {
+    name: string;
+    displayLabel: string;
+};
+
 export type TaskBoardNode = {
     id: string;
     title: string | null;
@@ -153,7 +177,7 @@ export type TaskBoardNode = {
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
-    possibleOutcomes: string[];
+    possibleOutcomeDetails: TaskBoardOutcome[];
     description: string | null;
     workflowSummary: string | null;
     // "assignee" | "candidate" | "none" -- kept as a plain string rather than a union, mirroring
@@ -161,6 +185,9 @@ export type TaskBoardNode = {
     // added later doesn't turn into a type error here before anything consumes it.
     viewerRole: string;
     candidateDisplayNames: string[];
+    // The jnt:simpleWorkflow child carrying the reviewer's comment, when this task has one; null
+    // for every plain task and for any other taskData node type.
+    simpleWorkflowTaskData: {id: string; comment: string | null} | null;
     targetNode: {url: string; property: {value: string} | null} | null;
 };
 

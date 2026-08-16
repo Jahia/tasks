@@ -14,6 +14,21 @@ const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 // but a plain relative path resolves correctly from a route rendered in the browser.
 const GRAPHQL_ENDPOINT = '/modules/graphql';
 
+/**
+ * The language the server resolves workflow outcome labels in (GqlTaskBoard#getPossibleOutcomeDetails).
+ * This route has no server render pass to inherit a locale from, so it reads the admin shell's own
+ * UI language off the page's jahiaGWTParameters global -- the same object the shell publishes as
+ * window.contextJsParameters -- cast locally for the same reason init.tsx casts for
+ * window.jahia.i18n: no ambient type declares it.
+ *
+ * Undefined when that global isn't there (an embedding that boots this remote some other way):
+ * the language argument is optional, and the server then falls back to the request's own locale.
+ */
+function uiLanguage(): string | undefined {
+    const shell = globalThis as unknown as {contextJsParameters?: {uilang?: string}};
+    return shell.contextJsParameters?.uilang;
+}
+
 type LoadState =
     | {status: 'loading'}
     | {status: 'error'; message: string}
@@ -30,13 +45,16 @@ type LoadState =
 export function TasksDashboardApp() {
     const [state, setState] = useState<LoadState>({status: 'loading'});
 
+    const language = uiLanguage();
+
     useEffect(() => {
         let cancelled = false;
         callGraphQL<InitialTaskBoardQueryResult>(GRAPHQL_ENDPOINT, INITIAL_TASK_BOARD_QUERY, {
             first: PAGE_SIZE,
             filterState: NOT_FINISHED_STATES,
             sortBy: DEFAULT_SORT_BY,
-            sortOrder: DEFAULT_SORT_ORDER
+            sortOrder: DEFAULT_SORT_ORDER,
+            language: language ?? null
         })
             .then(data => {
                 if (!cancelled) {
@@ -51,7 +69,9 @@ export function TasksDashboardApp() {
         return () => {
             cancelled = true;
         };
-    }, []);
+        // Effectively mount-only: uiLanguage() reads a global the page sets before any remote
+        // loads, so this never actually changes for the life of the route.
+    }, [language]);
 
     if (state.status === 'loading') {
         return <Loader/>;
@@ -72,6 +92,7 @@ export function TasksDashboardApp() {
             graphqlEndpoint={GRAPHQL_ENDPOINT}
             currentUserKey={state.data.taskBoardCurrentUserKey}
             canReviewAll={state.data.taskBoardCanReviewAll}
+            language={language}
         />
     );
 }
