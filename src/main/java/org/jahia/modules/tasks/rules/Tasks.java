@@ -55,6 +55,7 @@ import org.jahia.services.workflow.WorkflowVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.ItemNotFoundException;
 import javax.jcr.PropertyIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
@@ -127,6 +128,42 @@ public class Tasks {
         currentUserTasks.setProperty("filterOnStates", new String[]{"active", "started", "suspended"});
         currentUserTasks.setProperty("sortBy", "jcr:created");
         return true;
+    }
+
+    /**
+     * PO-trial 2026-08 (#65): copies a manual task's {@code assignee} reference -- the property
+     * Content Editor now offers a user picker for (see definitions.cnd) -- onto
+     * {@code assigneeUserKey}, which is what the task board's Owner column, its mutations and
+     * {@code TaskAuthorizationService} all read. Without it a task assigned through the standard
+     * content UI would still show as "Unassigned" on the board.
+     *
+     * <p>Called from the rule carrying the same marker in rules.drl, which fires on a change to
+     * {@code assignee} on a {@code jnt:task}. Writing assigneeUserKey here re-enters the rule
+     * engine on THAT property, which is why the value is compared first: an edit that changes
+     * nothing writes nothing. Clearing the reference clears the key with it.
+     *
+     * <p>Revert = delete this method and that rule.
+     */
+    public void mirrorAssigneeToUserKey(AddedNodeFact node) {
+        try {
+            JCRNodeWrapper task = node.getNode();
+            String assigneeUserKey = "";
+            if (task.hasProperty("assignee")) {
+                try {
+                    assigneeUserKey = task.getProperty("assignee").getNode().getPath();
+                } catch (ItemNotFoundException e) {
+                    // A weakreference whose target has been deleted resolves to nothing: treated
+                    // as "no assignee" rather than failing the edit that triggered this.
+                    logger.warn("Task {} references an assignee that no longer exists", task.getPath());
+                }
+            }
+            String current = task.hasProperty("assigneeUserKey") ? task.getPropertyAsString("assigneeUserKey") : "";
+            if (!assigneeUserKey.equals(current)) {
+                task.setProperty("assigneeUserKey", assigneeUserKey);
+            }
+        } catch (RepositoryException e) {
+            logger.error("cannot mirror the task assignee onto assigneeUserKey", e);
+        }
     }
 
     public void assignTask(AddedNodeFact node, String username) {

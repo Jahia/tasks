@@ -2,7 +2,13 @@
 
 [jnt:task] > jnt:content, mix:title
  - jcr:title (string)
- - assignee (weakreference, choicelist[users]) protected hidden < jnt:user
+ // PO-trial 2026-08 (#65): was "protected hidden", which is exactly what kept Content Editor from
+ // offering an assignee picker (a protected property is the repository's to write, and a hidden
+ // one is never rendered). Unprotected/unhidden so a task created through the standard content UI
+ // can be assigned there; the value is mirrored onto assigneeUserKey -- the property the board,
+ // its mutations and its RBAC actually read -- by the rule of the same marker in rules.drl.
+ // Revert = restore "protected hidden" on this one line.
+ - assignee (weakreference, choicelist[users]) < jnt:user
  - assigneeUserKey (string)
  - candidates (string) multiple
  - description (string)

@@ -67,7 +67,17 @@
         <jahia-depends>default,graphql-dxm-provider</jahia-depends>
         <export-package>org.jahia.modules.tasks.rules,org.jahia.modules.tasks.graphql</export-package>
         <jahia-module-type>system</jahia-module-type>
-        <jahia-deploy-on-site>system</jahia-deploy-on-site>
+        <!-- PO-trial 2026-08 (#65): was "system" (i.e. /sites/systemsite only), which is what put
+             the "My tasks" dashboard tile on user pages and nothing else. It is ALSO what kept
+             jnt:tasks/jnt:task out of jContent's create menu on every real site: core builds that
+             menu from the node types of the modules INSTALLED ON THE SITE plus their dependencies
+             (org.jahia.utils.NodeTypesUtils#getContentTypesAsTree, which iterates
+             NodeTypeRegistry#getNodeTypes(<module id>) over site.getInstalledModules()), so a
+             system module absent from a site's j:installedModules contributes none of its types
+             there. Widened to "all" so Jahia's own auto-install
+             (ModuleInstallationHelper#autoInstallModulesToSites) adds this module to every site
+             on module start. Revert = put "system" back; see the commit body. -->
+        <jahia-deploy-on-site>all</jahia-deploy-on-site>
         <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
         <jahia-module-signature>MC0CFQCBIuef+YTEVKKxucrOer8JO5czXwIUZB14BWQdr8jkrOByO+hzKVCJJQU=</jahia-module-signature>
     </properties>
