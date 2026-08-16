@@ -72,6 +72,7 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             description
             workflowSummary
             viewerRole
+            isAssignableToMe
             candidateDisplayNames
             simpleWorkflowTaskData {
                 id
@@ -161,6 +162,19 @@ export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
+// The one-click fast path (#67): claim + complete in a single request, for an ACTIVE task the
+// viewer is eligible to take. Deliberately a different mutation from COMPLETE_TASK_MUTATION rather
+// than the same one behind a flag -- see TaskBoardMutationExtensions#reviewTask for why the two
+// have different state guards, different RBAC and different failure semantics. A started task the
+// viewer already owns keeps using completeTask; there is nothing left to claim there.
+export const REVIEW_TASK_MUTATION = /* GraphQL */ `
+    mutation ReviewTask($id: String!, $outcome: String!) {
+        reviewTask(id: $id, outcome: $outcome) {
+            id
+        }
+    }
+`;
+
 // One completion decision a started task offers. displayLabel is resolved server-side, in the
 // workflow's own resource bundle (GqlTaskBoard#getPossibleOutcomeDetails) -- the client displays
 // it verbatim and never derives a label from the name itself.
@@ -184,6 +198,11 @@ export type TaskBoardNode = {
     // the server's deliberately non-enum GraphQL field (see GqlTaskBoard#getViewerRole), so a role
     // added later doesn't turn into a type error here before anything consumes it.
     viewerRole: string;
+    // Whether the viewer is owner-or-candidate for this task, i.e. eligible to claim it. Distinct
+    // from viewerRole !== 'none' only in intent, but it is the field the one-click fast path gates
+    // on: viewerRole is deliberately independent of canReviewAll (see GqlTaskBoard#getViewerRole),
+    // so a reviewer acting on a task they are not a candidate for reads 'none' there.
+    isAssignableToMe: boolean;
     candidateDisplayNames: string[];
     // The jnt:simpleWorkflow child carrying the reviewer's comment, when this task has one; null
     // for every plain task and for any other taskData node type.

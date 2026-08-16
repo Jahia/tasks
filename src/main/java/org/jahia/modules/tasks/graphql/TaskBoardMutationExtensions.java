@@ -11,10 +11,14 @@ import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.services.content.JCRSessionWrapper;
 import org.jahia.services.usermanager.JahiaUser;
+import org.jahia.services.workflow.WorkflowService;
+import org.jahia.services.workflow.WorkflowTask;
+import org.jahia.utils.i18n.JahiaLocaleContextHolder;
 
 import javax.jcr.RepositoryException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Root task-board mutations -- the state-transition actions behind the task board's
@@ -54,11 +58,7 @@ public final class TaskBoardMutationExtensions {
         if (!STATE_ACTIVE.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only an active task can be assigned");
         }
-        TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
-        if (!authorizationService.isOwnerOrCandidate(task, user)
-                && !authorizationService.canReviewAllTasks(session.getNode("/"))) {
-            throw new TaskGraphQLException("You are not eligible to be assigned this task");
-        }
+        requireEligibleToClaim(task, user, session);
 
         // Deliberately stays "active" here rather than flipping to "started": the UI has three
         // distinct phases (Unassigned -> Assigned -> Active/In-Progress), and "started" is what
@@ -66,8 +66,7 @@ public final class TaskBoardMutationExtensions {
         // an owner now; updateTaskState(id, "started") (the client's own "Start" action) is what
         // actually advances it, mirroring how unassignTask reverts a task to owner-less "active"
         // rather than some other state.
-        task.setProperty("assigneeUserKey", user.getUserKey());
-        session.save();
+        applyClaim(task, session, user);
         return new GqlTaskBoard(task);
     }
 
@@ -133,16 +132,101 @@ public final class TaskBoardMutationExtensions {
         if (!STATE_STARTED.equals(task.getPropertyAsString(PROPERTY_STATE))) {
             throw new TaskGraphQLException("Only a started task can be completed");
         }
-        if (!GqlTaskBoard.readPossibleOutcomes(task).contains(outcome)) {
-            throw new TaskGraphQLException("\"" + outcome + "\" is not a valid outcome for this task");
+        requireDeclaredOutcome(task, outcome);
+
+        applyCompletion(task, session, outcome);
+        return new GqlTaskBoard(task);
+    }
+
+    /**
+     * The board's one-click review fast path (#67): claim + complete a publication-review task in a
+     * single request, for a reviewer who would otherwise have to run assignTaskToMe -> updateTaskState
+     * -- "started" -> completeTask as three sequential round trips (three clicks, three refetches) to
+     * record one decision. ~90% of what this board is used for is exactly that decision.
+     *
+     * <p><b>Why a separate mutation rather than an opt-in argument on completeTask.</b> The two have
+     * genuinely different contracts, and a flag would make all three of completeTask's guards
+     * conditional on it: completeTask means "finish the started task I already hold" (state must be
+     * {@code started}, RBAC is {@link TaskAuthorizationService#canActOnTask} -- assignee-or-reviewer),
+     * while this means "take this task and decide it" (state {@code active} or {@code started}, RBAC is
+     * the wider owner-or-candidate-or-reviewer that gates assignTaskToMe, plus a concurrency guard
+     * completeTask has no need for). Both still write through the same private helpers below, so the
+     * actual state transitions exist once.
+     *
+     * <p><b>No separate "start" step.</b> Deliberate, not an omission: nothing in the workflow engine
+     * needs one. The Drools rules in rules.drl only propagate two property changes to the engine --
+     * {@code assigneeUserKey} (-> WorkflowService#assignTask) and {@code state} becoming
+     * {@code finished} (-> WorkflowService#completeTask); {@code started} fires no rule and is purely
+     * the board's own three-phase bookkeeping. Core's own CompleteTaskCommand additionally calls
+     * {@code taskService.start(...)} itself immediately before {@code taskService.complete(...)}, so
+     * the engine-side start happens regardless of what this module writes.
+     *
+     * <p><b>Two saves, never one.</b> The claim and the completion must land in separate
+     * {@code session.save()} calls. Both rules keying off one save would fire in an undefined order
+     * within a single Drools activation cycle, and worse, JBPM6WorkflowProvider guards every provider
+     * call with a thread-local re-entrancy flag ({@code loop}): the completion issued from inside the
+     * assignment's own call stack would be silently skipped, completing the JCR node while leaving the
+     * real workflow open.
+     *
+     * <p><b>Failure semantics: fail loudly, never silently claimed; no auto-revert.</b> Everything that
+     * can be checked is checked before the first write, including the workflow's own per-outcome
+     * permission (see {@link #requireOutcomePermission}) -- which is the failure that actually occurs in
+     * practice, and which the engine would otherwise swallow. If the completion still fails after the
+     * claim landed, the claim is deliberately NOT rolled back, because a rollback is the more dangerous
+     * of the two options here: it would issue a further engine mutation ({@code assignTask(null)} ->
+     * {@code taskService.release}) against a task whose engine-side state is by then unknown -- core's
+     * CompleteTaskCommand writes {@code state=finished} back through its own system session, so a
+     * completion can have succeeded in the engine even when the call this module made threw. Instead the
+     * error message states explicitly that the task is now assigned to the caller, and the granular
+     * ladder (Unassign / retry the decision) remains available on the board to resolve it. Retrying
+     * reviewTask itself is safe: the claim below is skipped when the caller already holds the task, so a
+     * retry is a pure completion.
+     */
+    @GraphQLField
+    @GraphQLDescription("Claim and complete a workflow review task with one of its declared outcomes in a single "
+            + "request -- the task board's one-click Publish/Reject fast path. Equivalent to assignTaskToMe + "
+            + "completeTask, for an active or started task that is either unassigned or already yours.")
+    public static GqlTaskBoard reviewTask(
+            @GraphQLName("id") @GraphQLNonNull String id,
+            @GraphQLName("outcome") @GraphQLNonNull String outcome) throws RepositoryException {
+        JCRSessionWrapper session = session();
+        JahiaUser user = TaskAuthorizationService.requireNonGuest(session);
+        JCRNodeWrapper task = loadTask(session, id);
+
+        // Restricted to real workflow tasks: a plain jnt:task declares no outcomes and has no engine
+        // behind it, so there is no review decision for this path to record (the board completes those
+        // through updateTaskState instead).
+        if (!task.isNodeType("jnt:workflowTask")) {
+            throw new TaskGraphQLException("Only a workflow task can be reviewed in one step");
+        }
+        String state = task.getPropertyAsString(PROPERTY_STATE);
+        if (!STATE_ACTIVE.equals(state) && !STATE_STARTED.equals(state)) {
+            throw new TaskGraphQLException("Only an active or started task can be reviewed");
         }
 
-        // finalOutcome must be set before state flips to "finished" in the same save:
-        // the Drools rule reads finalOutcome off this same node when it reacts to the
-        // state change, so both writes need to land together in one session.save().
-        task.setProperty("finalOutcome", outcome);
-        task.setProperty(PROPERTY_STATE, STATE_FINISHED);
-        session.save();
+        // Concurrency guard, checked before eligibility so a reviewer (who passes every other check on
+        // every task) still cannot silently take a task out from under whoever already claimed it.
+        // Someone else holding it is a conflict to report, not a claim to steal -- the granular
+        // Unassign action exists for deliberately taking it back.
+        TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
+        String assignee = task.getPropertyAsString("assigneeUserKey");
+        boolean alreadyMine = authorizationService.isAssignee(task, user);
+        if (assignee != null && !assignee.isEmpty() && !alreadyMine) {
+            throw new TaskGraphQLException("This task is already claimed by another user (" + assignee
+                    + ") -- it must be unassigned before you can review it");
+        }
+
+        requireEligibleToClaim(task, user, session);
+        requireDeclaredOutcome(task, outcome);
+        // Before the claim, not after: this is the check the engine would otherwise apply *inside* the
+        // completion, after the task had already been claimed -- and apply silently (see the method's
+        // own comment). Hoisting it here is what keeps a denied review from leaving a claim behind.
+        requireOutcomePermission(task, outcome);
+
+        if (!alreadyMine) {
+            applyClaim(task, session, user);
+        }
+        applyCompletion(task, session, outcome);
         return new GqlTaskBoard(task);
     }
 
@@ -192,6 +276,106 @@ public final class TaskBoardMutationExtensions {
     private static void requireCanAct(JCRNodeWrapper task, JahiaUser user, JCRSessionWrapper session) throws RepositoryException {
         if (!TaskAuthorizationService.get().canActOnTask(task, user, session.getNode("/"))) {
             throw new TaskGraphQLException("You are not allowed to act on this task");
+        }
+    }
+
+    /**
+     * The "may this user take this task" gate -- deliberately wider than {@link #requireCanAct}: it also
+     * admits an eligible candidate who does not own the task yet, which is the whole point of claiming
+     * one. Shared by assignTaskToMe and reviewTask so the two cannot drift into disagreeing about who
+     * is allowed to pick a task up.
+     */
+    private static void requireEligibleToClaim(JCRNodeWrapper task, JahiaUser user, JCRSessionWrapper session)
+            throws RepositoryException {
+        TaskAuthorizationService authorizationService = TaskAuthorizationService.get();
+        if (!authorizationService.isOwnerOrCandidate(task, user)
+                && !authorizationService.canReviewAllTasks(session.getNode("/"))) {
+            throw new TaskGraphQLException("You are not eligible to be assigned this task");
+        }
+    }
+
+    private static void requireDeclaredOutcome(JCRNodeWrapper task, String outcome) {
+        if (!GqlTaskBoard.readPossibleOutcomes(task).contains(outcome)) {
+            throw new TaskGraphQLException("\"" + outcome + "\" is not a valid outcome for this task");
+        }
+    }
+
+    /**
+     * Claims {@code task} for {@code user}. The write itself is one property + one save, but that save
+     * is what fires the "A workflow task has been assigned" rule in rules.drl, which is what actually
+     * claims the task in the workflow engine -- see this class's own javadoc.
+     */
+    private static void applyClaim(JCRNodeWrapper task, JCRSessionWrapper session, JahiaUser user)
+            throws RepositoryException {
+        task.setProperty("assigneeUserKey", user.getUserKey());
+        session.save();
+    }
+
+    /**
+     * Completes {@code task} with {@code outcome}. finalOutcome must be set before state flips to
+     * "finished" in the same save: the Drools rule reads finalOutcome off this same node when it reacts
+     * to the state change, so both writes need to land together in one session.save().
+     */
+    private static void applyCompletion(JCRNodeWrapper task, JCRSessionWrapper session, String outcome)
+            throws RepositoryException {
+        task.setProperty("finalOutcome", outcome);
+        task.setProperty(PROPERTY_STATE, STATE_FINISHED);
+        session.save();
+    }
+
+    /**
+     * Rejects the review up front when the workflow itself declares a JCR permission for this outcome
+     * that the caller does not hold on the content under review.
+     *
+     * <p>This mirrors, ahead of time, a check core performs inside the completion: JBPM6's
+     * CompleteTaskCommand looks the {@code <taskName>.<outcome>} key up in the workflow's registered
+     * permissions map and, if the caller lacks that permission on the process's {@code nodeId}, logs an
+     * error and <em>returns without completing anything</em>. Because this module completes by writing
+     * {@code state=finished} to the JCR node and letting the Drools rule propagate that to the engine,
+     * a denial there is invisible: the board's task node reads "finished" while the real workflow is
+     * still open. Checking first turns that into an error the caller actually sees, and -- for
+     * reviewTask specifically -- keeps a denied decision from leaving the task claimed.
+     *
+     * <p>The two inputs are read from exactly the sources core uses, so this is not an approximation of
+     * core's check: {@link WorkflowTask#getOutcomesPermissions()} is the same registered map, already
+     * stripped of its {@code <taskName>.} prefix by core's own BaseCommand, and the task node's
+     * {@code targetNode} property is set (in JBPMTaskLifeCycleEventListener) from the very {@code nodeId}
+     * process variable CompleteTaskCommand resolves the permission against.
+     *
+     * <p>Best-effort by design: anything that cannot be resolved (a process no longer live in the engine,
+     * a workflow that declares no permission for this outcome, a target node that no longer exists)
+     * leaves the decision to the engine rather than blocking a review this module merely failed to
+     * verify.
+     */
+    private static void requireOutcomePermission(JCRNodeWrapper task, String outcome) {
+        String permission;
+        JCRNodeWrapper targetNode;
+        try {
+            if (!task.hasProperty("provider") || !task.hasProperty("taskId") || !task.hasProperty("targetNode")) {
+                return;
+            }
+            WorkflowTask workflowTask = WorkflowService.getInstance().getWorkflowTask(
+                    task.getPropertyAsString("taskId"),
+                    task.getPropertyAsString("provider"),
+                    JahiaLocaleContextHolder.getLocale());
+            if (workflowTask == null) {
+                return;
+            }
+            Map<String, String> outcomesPermissions = workflowTask.getOutcomesPermissions();
+            permission = outcomesPermissions != null ? outcomesPermissions.get(outcome) : null;
+            if (permission == null) {
+                return;
+            }
+            targetNode = (JCRNodeWrapper) task.getProperty("targetNode").getNode();
+        } catch (Exception e) {
+            // Enrichment of an authorization decision the engine will make again anyway, not the
+            // decision itself -- a lookup failure here must not fail an otherwise valid review.
+            return;
+        }
+
+        if (!targetNode.hasPermission(permission)) {
+            throw new TaskGraphQLException("You do not have the \"" + permission + "\" permission required to "
+                    + "complete this task with the \"" + outcome + "\" outcome");
         }
     }
 }

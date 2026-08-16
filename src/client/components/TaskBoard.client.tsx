@@ -18,6 +18,7 @@ import {
     DEFAULT_SORT_ORDER,
     NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
+    REVIEW_TASK_MUTATION,
     SCOPE_ALL,
     SCOPE_ASSIGNED_TO_ME,
     SCOPE_CLAIMABLE,
@@ -68,6 +69,11 @@ const labels = {
     actionPreview: 'Preview',
     actionComplete: 'Complete',
     actionAddComment: 'Add a comment',
+    // Tooltip on the one-click decision buttons only (#67). The button itself is labelled with the
+    // workflow's own outcome label ("Publish" / "Reject publication"), which says nothing about the
+    // task also being claimed on the way -- this is where that is stated, without turning every
+    // decision button into a sentence.
+    oneClickHint: 'Assigns this task to you and records your decision in one step',
     commentPlaceholder: 'Comment (optional)',
     waitingToday: 'today',
     waitingUnknown: 'unknown',
@@ -274,6 +280,9 @@ type MenuAction = {
     label: string;
     mutation: string;
     variables: {id: string} & Record<string, unknown>;
+    // Set only on the one-click fast path (#67), where the button does more than its outcome label
+    // says. Rendered as the button's tooltip.
+    hint?: string;
 };
 
 // What one click on a row action asks the board to run. The optional comment is written first, in
@@ -304,7 +313,8 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     const storedComment = task.simpleWorkflowTaskData?.comment ?? '';
     const [comment, setComment] = useState(storedComment);
     const [isCommentOpen, setCommentOpen] = useState(false);
-    const canAct = task.owner === currentUserKey || canReviewAll;
+    const isMine = task.owner === currentUserKey;
+    const canAct = isMine || canReviewAll;
     const targetUrl = task.targetNode?.url;
     // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
     // started) -> Active/In-Progress (started). assignTaskToMe deliberately leaves state
@@ -317,6 +327,37 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     // decisions, not routine task-management actions.
     const decisionActions: MenuAction[] = [];
     let showPreview = false;
+
+    // Whether this row qualifies for the one-click fast path (#67): an active task, not held by
+    // anyone else, that this viewer may take, and that has an actual decision to record.
+    //
+    // The eligibility half is isAssignableToMe || canReviewAll, NOT viewerRole: viewerRole is
+    // deliberately independent of canReviewAll (see GqlTaskBoard#getViewerRole), so a reviewer
+    // looking at a task they are not a candidate for reads "none" there while still being fully
+    // entitled to decide it -- gating on the role alone would hide the fast path from exactly the
+    // users it exists for.
+    //
+    // The "not held by anyone else" half mirrors reviewTask's own concurrency guard client-side:
+    // canAct is true for a reviewer on ANY task, including one another user has already claimed,
+    // and reviewTask refuses to steal those. Without this the board would offer a reviewer a button
+    // that can only ever come back as an error.
+    const canReviewInOneClick = task.state === 'active'
+        && (isUnassigned || isMine)
+        && (task.isAssignableToMe || canReviewAll)
+        && task.possibleOutcomeDetails.length > 0;
+
+    // Reject before accept, matching the requested layout order, regardless of the order the
+    // workflow happens to declare its outcomes in -- see REJECT_OUTCOME_PATTERN for why this
+    // reads the outcome's name and the button reads its label.
+    const decisionsFor = (mutation: string, hint?: string): MenuAction[] => [...task.possibleOutcomeDetails]
+        .sort((a, b) => Number(!REJECT_OUTCOME_PATTERN.test(a.name)) - Number(!REJECT_OUTCOME_PATTERN.test(b.name)))
+        .map(outcome => ({
+            key: outcome.name,
+            label: outcome.displayLabel,
+            mutation,
+            variables: {id: task.id, outcome: outcome.name},
+            hint
+        }));
 
     if (task.state === 'active' && isUnassigned) {
         primaryActions.push({key: 'assign', label: labels.actionAssignToMe, mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
@@ -332,19 +373,9 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
             {key: 'suspend', label: labels.actionSuspend, mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
         );
         showPreview = true;
-        // Reject before accept, matching the requested layout order, regardless of the order the
-        // workflow happens to declare its outcomes in -- see REJECT_OUTCOME_PATTERN for why this
-        // reads the outcome's name and the button reads its label.
-        const outcomes = [...task.possibleOutcomeDetails]
-            .sort((a, b) => Number(!REJECT_OUTCOME_PATTERN.test(a.name)) - Number(!REJECT_OUTCOME_PATTERN.test(b.name)));
-        for (const outcome of outcomes) {
-            decisionActions.push({
-                key: outcome.name,
-                label: outcome.displayLabel,
-                mutation: COMPLETE_TASK_MUTATION,
-                variables: {id: task.id, outcome: outcome.name}
-            });
-        }
+        // The task is already claimed and started here, so there is nothing for the fast path to
+        // collapse: this is the plain completion.
+        decisionActions.push(...decisionsFor(COMPLETE_TASK_MUTATION));
 
         if (decisionActions.length === 0) {
             // A task with no declared outcomes is a manual one (a plain jnt:task, or a workflow
@@ -362,6 +393,18 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         }
     } else if (canAct && task.state === 'suspended') {
         primaryActions.push({key: 'resume', label: labels.actionResume, mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
+    }
+
+    // Layered ON TOP of the active branches above rather than replacing either of them: the
+    // granular ladder stays exactly as it was (Assign to me on an unassigned task, Unassign/Start
+    // on one already claimed), so a reviewer who wants to claim now and decide later still can.
+    // This only adds the decision that used to require walking the whole ladder first.
+    if (canReviewInOneClick) {
+        // Review-before-decide, previously reachable only after Assign + Start: the target content
+        // is exactly what the reviewer needs to look at BEFORE deciding, so making the decision one
+        // click away while leaving the preview three clicks away would collapse the wrong half.
+        showPreview = true;
+        decisionActions.push(...decisionsFor(REVIEW_TASK_MUTATION, labels.oneClickHint));
     }
 
     if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
@@ -429,6 +472,7 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
                         <Button
                             key={action.key}
                             label={action.label}
+                            title={action.hint}
                             size="small"
                             color="accent"
                             isDisabled={isBusy}
