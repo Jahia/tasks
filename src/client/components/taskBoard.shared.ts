@@ -52,9 +52,9 @@ export const SCOPE_ALL = 'all';
 
 export type TaskScope = typeof SCOPE_ASSIGNED_TO_ME | typeof SCOPE_CLAIMABLE | typeof SCOPE_ALL;
 
-// Every field a board row needs, written once and spliced into each query below -- the initial
-// query asks for the same rows three times over (one per scope), so repeating this selection
-// inline would be the third copy of it in this file.
+// Every field a board row needs, written once and spliced into both queries below -- the initial
+// fetch and the paging/filtering one ask for identical rows, and a row field added to one of them
+// only is a row that renders differently before and after the first interaction.
 const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
     pageInfo {
         hasNextPage
@@ -103,25 +103,39 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
     }
 `;
 
+// Which scope the board opens on: "All tasks", always (#61). Every viewer sees the whole board
+// they are entitled to see first, and narrows it themselves with the scope tabs -- rather than
+// landing on a pre-filtered subset whose emptiness (or smallness) reads as "there is nothing
+// here" when there usually is. Kept a named constant rather than inlined at both entry points, so
+// the client default and the initial query below can't drift apart.
+//
+// Replaces #61's pickInitialScope(), which opened on the first NON-EMPTY of assignedToMe /
+// claimable / all. That function was the only consumer of the other two scopes' pages, so
+// dropping it also drops two thirds of the initial query -- see below.
+//
+// Typed as the literal scope it is, NOT widened to TaskScope: both entry points index the initial
+// result with it (result[INITIAL_SCOPE]), and that result only carries the one scope's page --
+// widening the type here would make those lookups an "implicitly any" compile error rather than
+// the checked field access they are.
+export const INITIAL_SCOPE: typeof SCOPE_ALL = SCOPE_ALL;
+
 // Used only by the two entry points for the first page: adds the viewer fields the client island
 // needs for its action display logic (see TaskBoardQueryExtensions#taskBoardCurrentUserKey/
-// #taskBoardCanReviewAll), and fetches page 1 of all three scopes at once.
+// #taskBoardCanReviewAll), and fetches page 1 of the scope the board opens on.
 //
-// Three pages in one round trip, rather than a count-only probe followed by a second fetch of
-// whichever scope wins: which scope the board opens on is only known after the counts come back
-// (see pickInitialScope), and the board has to open with real rows for that scope, not with the
-// wrong scope's rows swapped out a moment later. The extra cost is two more query-level-sliced
-// pages (#64), each proportional to the page size and not to the size of the board -- and the two
-// added ones are the narrow scopes, which are usually the smallest.
+// ONE page, not the three aliased ones #61 fetched. Those three existed solely to decide the
+// opening scope from real rows; with that decision now fixed at INITIAL_SCOPE, the other two
+// pages were fetched and discarded on every single board load. Nothing else consumed them: the
+// scope tabs carry no counts (see SCOPE_OPTIONS in TaskBoard.client.tsx), and switching scope
+// re-fetches page 1 of the new scope anyway (the effect on `scope` in that file), so there was no
+// instant-switch cache to preserve either.
+//
+// Still an aliased field rather than a plain `taskBoard`, so the result keeps the shape both
+// entry points index with (result[INITIAL_SCOPE]) and a second scope could be added back here
+// without changing them.
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
     query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $language: String) {
-        assignedToMe: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${SCOPE_ASSIGNED_TO_ME}") {
-            ${TASK_BOARD_PAGE_SELECTION}
-        }
-        claimable: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${SCOPE_CLAIMABLE}") {
-            ${TASK_BOARD_PAGE_SELECTION}
-        }
-        all: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${SCOPE_ALL}") {
+        ${INITIAL_SCOPE}: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${INITIAL_SCOPE}") {
             ${TASK_BOARD_PAGE_SELECTION}
         }
         taskBoardCurrentUserKey
@@ -236,9 +250,9 @@ export type TaskBoardQueryResult = {
     taskBoard: TaskBoardConnection;
 };
 
+// Keyed by INITIAL_SCOPE's own value (SCOPE_ALL), so the type follows the query's alias rather
+// than restating it: both entry points read result[INITIAL_SCOPE].
 export type InitialTaskBoardQueryResult = {
-    [SCOPE_ASSIGNED_TO_ME]: TaskBoardConnection;
-    [SCOPE_CLAIMABLE]: TaskBoardConnection;
     [SCOPE_ALL]: TaskBoardConnection;
     taskBoardCurrentUserKey: string;
     taskBoardCanReviewAll: boolean;
@@ -282,25 +296,4 @@ export function dueStatus(dueDate: string | null, state: string | null, now: num
     }
 
     return due < now ? 'overdue' : 'due';
-}
-
-/**
- * Which scope the board opens on: the first of "assigned to me" / "available to my group(s)" /
- * "all" that actually has something in it. A user with work of their own lands on it directly;
- * one with nothing assigned but something to pick up lands on the pool; a reviewer (who typically
- * has neither) lands on the full board, which is what they came for anyway.
- *
- * Decided from the initial fetch's own three pages -- no extra request, and no possibility of the
- * decision disagreeing with the rows the board then shows.
- */
-export function pickInitialScope(result: InitialTaskBoardQueryResult): TaskScope {
-    if (result[SCOPE_ASSIGNED_TO_ME].edges.length > 0) {
-        return SCOPE_ASSIGNED_TO_ME;
-    }
-
-    if (result[SCOPE_CLAIMABLE].edges.length > 0) {
-        return SCOPE_CLAIMABLE;
-    }
-
-    return SCOPE_ALL;
 }

@@ -3,7 +3,7 @@ import {Banner, Loader} from '@jahia/moonstone';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../client/components/TaskBoard.client';
 import {callGraphQL} from '../client/lib/graphqlClient';
 import {useTasksTranslation} from '../client/lib/i18n';
-import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES, pickInitialScope} from '../client/components/taskBoard.shared';
+import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_SCOPE, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.shared';
 
 // Must match TaskBoard's own itemsPerPage default -- otherwise the first page fetched here
@@ -86,14 +86,12 @@ export function TasksDashboardApp() {
         return <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">{state.message}</Banner>;
     }
 
-    // The initial query returns page 1 of all three scopes; the board opens on the first one that
-    // has anything in it (see pickInitialScope) and takes that scope's page as its initial state.
-    const initialScope = pickInitialScope(state.data);
-
+    // The initial query returns page 1 of the scope the board opens on -- "All tasks" for every
+    // viewer (see INITIAL_SCOPE) -- and that page is the board's initial state.
     return (
         <TaskBoard
-            initialConnection={state.data[initialScope]}
-            initialScope={initialScope}
+            initialConnection={state.data[INITIAL_SCOPE]}
+            initialScope={INITIAL_SCOPE}
             graphqlEndpoint={GRAPHQL_ENDPOINT}
             currentUserKey={state.data.taskBoardCurrentUserKey}
             canReviewAll={state.data.taskBoardCanReviewAll}
