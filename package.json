@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build && webpack --config webpack.config.cjs",
+    "build": "tsc --noEmit && vite build && webpack --config webpack.config.cjs --mode production",
     "clean": "rm -rf dist/ src/main/resources/javascript/apps/",
     "dev": "vite build --watch",
     "lint": "eslint ."

@@ -62,6 +62,11 @@ module.exports = (env, argv) => {
             }),
             new CopyWebpackPlugin({patterns: [{from: './package.json', to: ''}]})
         ],
+        // Whatever --mode the invocation asked for, development for a bare `webpack` run.
+        // The packaged build is not that bare run: package.json's "build" script -- the one
+        // the Maven frontend plugin calls -- passes "--mode production" explicitly, so the
+        // chunks that end up in the jar are minified. The flag lives there rather than in this
+        // default, so a hand-run `webpack` on a dev box stays a fast, readable build.
         mode: argv.mode === 'production' ? 'production' : 'development'
     };
 
