@@ -1,14 +1,14 @@
 import {createSite, deleteSite, createUser, deleteUser, addNode, deleteNode, grantRoles, getUserPath} from '@jahia/cypress';
-import {TEST_SITE_KEY, TEST_TEMPLATE_SET} from '../support/constants';
+import {LIST_SITE_KEY as TEST_SITE_KEY, PRIVILEGED_ROLE, TEST_PASSWORD, TEST_TEMPLATE_SET} from '../support/constants';
 
 // Covers jnt:createTaskForm's createTask mutation (Phase 2) and the isAssignableToMe field that
 // drives the jnt:taskList row view's "Assign to me" visibility (candidate-based, independent of
 // canReviewAll). Row-action mutations themselves (assign/unassign/suspend/complete) are shared
 // with the task board and already covered by task-board.cy.ts.
 const CANDIDATE = 'tasks-e2e-list-candidate';
-const CANDIDATE_PASSWORD = 'password123';
+const CANDIDATE_PASSWORD = TEST_PASSWORD;
 const BYSTANDER = 'tasks-e2e-list-bystander';
-const BYSTANDER_PASSWORD = 'password123';
+const BYSTANDER_PASSWORD = TEST_PASSWORD;
 const CONTENT_PARENT = `/sites/${TEST_SITE_KEY}/contents/e2e-task-list`;
 
 type AddNodeResponse = {data: {jcr: {addNode: {uuid: string}}}};
@@ -22,8 +22,8 @@ describe('Task list creation (jnt:createTaskForm createTask) and assignability (
         // TaskBoardQueryExtensions' class comment) -- the standard "reader" role only grants
         // jcr:read_live, so a plain candidate/bystander needs the hidden "privileged" role
         // (jcr:read_default) to read the task node at all, regardless of isAssignableToMe.
-        grantRoles('/', ['privileged'], CANDIDATE, 'USER');
-        grantRoles('/', ['privileged'], BYSTANDER, 'USER');
+        grantRoles('/', [PRIVILEGED_ROLE], CANDIDATE, 'USER');
+        grantRoles('/', [PRIVILEGED_ROLE], BYSTANDER, 'USER');
         addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:contentFolder', name: 'e2e-task-list'});
     });
 
@@ -75,6 +75,13 @@ describe('Task list creation (jnt:createTaskForm createTask) and assignability (
             // Jahia shards user nodes into hashed subfolders (e.g. /users/cd/hc/dg/<username>),
             // not a flat /users/<username> -- candidates must store the real resolved path, not
             // a guessed one, or isOwnerOrCandidate's path comparison never matches.
+            //
+            // Writing `candidates` straight onto the node is legitimate HERE and nowhere else in
+            // this suite: a plain jnt:task has no workflow process behind it, so the property is
+            // the whole truth about who may take it. On a jnt:workflowTask it is a MIRROR of the
+            // engine's own potential-owner assignment, and setting it by hand produces a task the
+            // board offers and the engine refuses -- which is why the workflow specs go through
+            // startPublicationReview instead (see support/taskFixtures.ts).
             getUserPath(CANDIDATE).then(({data}: {data: {admin: {userAdmin: {user: {node: {path: string}}}}}}) => {
                 const candidatePath = data.admin.userAdmin.user.node.path;
 

@@ -1,11 +1,12 @@
 import {createSite, deleteSite, createUser, deleteUser, addNode, deleteNode, grantRoles} from '@jahia/cypress';
-import {TEST_SITE_KEY, TEST_TEMPLATE_SET} from '../support/constants';
+import {DETAIL_SITE_KEY as TEST_SITE_KEY, REVIEWER_ROLE, TEST_PASSWORD, TEST_TEMPLATE_SET} from '../support/constants';
+import {errorMessagesOf} from '../support/taskFixtures';
 
 // Covers the jnt:task detail view's updateTaskState mutation (Phase 1) and the jnt:simpleWorkflow
 // taskData inline-edit mutation. Row-action mutations shared with the task board / task list
 // (assign/unassign/suspend/complete) are already covered by task-board.cy.ts.
 const REVIEWER = 'tasks-e2e-detail-reviewer';
-const REVIEWER_PASSWORD = 'password123';
+const REVIEWER_PASSWORD = TEST_PASSWORD;
 const TASKS_CONTAINER = `/sites/${TEST_SITE_KEY}/contents/e2e-task-detail`;
 
 type AddNodeResponse = {data: {jcr: {addNode: {uuid: string}}}};
@@ -29,7 +30,7 @@ describe('Task detail (jnt:task updateTaskState / jnt:simpleWorkflow updateTaskD
         createUser(REVIEWER, REVIEWER_PASSWORD);
         // editor-in-chief grants the "publish" permission TaskAuthorizationService#canReviewAllTasks
         // checks, letting this persona act on any task regardless of ownership.
-        grantRoles('/', ['editor-in-chief'], REVIEWER, 'USER');
+        grantRoles('/', [REVIEWER_ROLE], REVIEWER, 'USER');
 
         addNode({parentPathOrId: `/sites/${TEST_SITE_KEY}/contents`, primaryNodeType: 'jnt:tasks', name: 'e2e-task-detail'});
     });
@@ -51,7 +52,7 @@ describe('Task detail (jnt:task updateTaskState / jnt:simpleWorkflow updateTaskD
                     mutationFile: 'graphql/updateTaskState.mutation.graphql',
                     variables: {id, state: 'not-a-real-state'}
                 }).then(response => {
-                    expect(response.graphQLErrors).to.have.length.greaterThan(0);
+                    expect(errorMessagesOf(response)).to.contain('"not-a-real-state" is not a valid task state');
                 });
             });
 

@@ -1,0 +1,6 @@
+mutation ResumeTask($id: String!) {
+    resumeTask(id: $id) {
+        id
+        state
+    }
+}

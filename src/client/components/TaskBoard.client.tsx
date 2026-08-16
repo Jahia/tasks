@@ -12,7 +12,7 @@ import type {DataTableColumn} from '@jahia/moonstone/DataTable';
 import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayout';
 import {callGraphQL} from '../lib/graphqlClient';
 import {formatDate, useTasksTranslation} from '../lib/i18n';
-import type {Translate, TranslatePlural} from '../lib/i18n';
+import type {Translate} from '../lib/i18n';
 import {
     ALL_STATES,
     ASSIGN_TASK_TO_ME_MUTATION,
@@ -28,9 +28,12 @@ import {
     SCOPE_CLAIMABLE,
     SUSPEND_TASK_MUTATION,
     TASK_BOARD_QUERY,
-    UNASSIGN_TASK_MUTATION
+    UNASSIGN_TASK_MUTATION,
+    waitingColor,
+    waitingDaysSince,
+    waitingLabel
 } from './taskBoard.shared';
-import type {TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
+import type {ChipColor, TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
 import {priorityLabel, stateLabel, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
 import './TaskBoard.client.css';
@@ -48,8 +51,6 @@ const SEARCH_DEBOUNCE_MS = 350;
 // actually rendered on the SSR-island path, where no i18next instance exists to translate against
 // -- see the header of ../lib/i18n.ts.
 
-type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
-
 // active: ready to be picked up. started: in progress. suspended: parked. finished: done.
 const STATE_CHIP_COLOR: Record<string, ChipColor> = {
     active: 'accent',
@@ -58,76 +59,10 @@ const STATE_CHIP_COLOR: Record<string, ChipColor> = {
     finished: 'success'
 };
 
-// ---------------------------------------------------------------------------------------------
-// Waiting duration
-// ---------------------------------------------------------------------------------------------
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const DAYS_PER_WEEK = 7;
-// Past this many whole days the duration reads in weeks instead of days, so a months-old task
-// says "9 weeks" rather than "64 days".
-const WAITING_WEEKS_FROM_DAYS = 14;
-// Escalation thresholds. The colour is never the only carrier of this information -- the chip's
-// own text always states the duration, so the same escalation is readable without seeing colour.
-const WAITING_WARNING_DAYS = 5;
-const WAITING_DANGER_DAYS = 10;
-// createdDate is nullable (a task whose jcr:created can't be read), and this column has to sort
-// and render regardless: one sentinel, checked in both places, rather than a nullable number.
-const WAITING_UNKNOWN = -1;
-
-// Whole 24h periods elapsed, not calendar days: "created 25 hours ago" is 1 day here even if that
-// crosses two midnights. Deliberate -- this is an age/SLA indicator ("how long has this been
-// sitting?"), and elapsed time is what that question means.
-function waitingDaysSince(createdDate: string | null): number {
-    if (!createdDate) {
-        return WAITING_UNKNOWN;
-    }
-
-    const created = new Date(createdDate).getTime();
-    if (Number.isNaN(created)) {
-        return WAITING_UNKNOWN;
-    }
-
-    // Clamped at 0: a task whose jcr:created is slightly in the future (clock skew between the
-    // server that wrote it and the browser reading it) is "today", not a negative age.
-    return Math.max(0, Math.floor((Date.now() - created) / MS_PER_DAY));
-}
-
-// Pluralized through i18next's own count mechanism rather than a ternary, so each language applies
-// its OWN rule to the locale file's "<key>" / "<key>_plural" pair -- French, for instance, keeps
-// the singular at 0 ("0 jour"), which an English-shaped `days === 1 ? ... : ...` cannot express.
-function waitingLabel(t: Translate, tPlural: TranslatePlural, days: number): string {
-    if (days === WAITING_UNKNOWN) {
-        return t('board.waiting.unknown', 'unknown');
-    }
-
-    if (days === 0) {
-        return t('board.waiting.today', 'today');
-    }
-
-    if (days < WAITING_WEEKS_FROM_DAYS) {
-        return tPlural('board.waiting.days', days, '{{count}} day', '{{count}} days');
-    }
-
-    const weeks = Math.floor(days / DAYS_PER_WEEK);
-    return tPlural('board.waiting.weeks', weeks, '{{count}} week', '{{count}} weeks');
-}
-
-function waitingColor(days: number): ChipColor {
-    if (days === WAITING_UNKNOWN) {
-        return 'default';
-    }
-
-    if (days > WAITING_DANGER_DAYS) {
-        return 'danger';
-    }
-
-    if (days > WAITING_WARNING_DAYS) {
-        return 'warning';
-    }
-
-    return 'default';
-}
+// The waiting-duration trio (waitingDaysSince/waitingLabel/waitingColor, plus their thresholds)
+// lives in taskBoard.shared.ts, beside dueStatus: both are pure functions of a stored value and an
+// instant, and keeping them out of this Moonstone-importing module is what lets them be exercised
+// directly (tests/cypress/e2e/task-duration.cy.ts, #63). Only their RENDERING is here.
 
 // ---------------------------------------------------------------------------------------------
 // Due date and priority (#66)

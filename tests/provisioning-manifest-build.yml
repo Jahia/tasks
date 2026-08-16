@@ -1,11 +1,15 @@
+# The Maven repositories a CI instance needs to resolve `mvn:` coordinates at all. Kept even though
+# nothing is installed below, so that adding a dependency here later is a one-line change.
 - addMavenRepository: 'https://store.jahia.com/nexus/content/repositories/jahia-public-app-store@id=JahiaStore'
 - addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@snapshots@noreleases@id=JahiaSnapshot'
 
-# The test suite creates its sites on dx-base-demo-templates (see tests/cypress/support/constants.ts) --
-# graphql-dxm-provider is not listed here, it comes from this module's own jahia-depends header.
-- installBundle:
-  - 'mvn:org.jahia.modules/dx-base-demo-core'
-  - 'mvn:org.jahia.modules/dx-base-demo-components'
-  - 'mvn:org.jahia.modules/dx-base-demo-templates'
-  autoStart: true
-  uninstallPreviousVersion: true
+# No module is installed here on purpose. The suite creates its sites on `templates-system`, the
+# only template set a stock Jahia EE already has (see TEST_TEMPLATE_SET in
+# cypress/support/constants.ts), and the module's own runtime dependencies -- default and
+# graphql-dxm-provider -- come from its <jahia-depends> header rather than from this manifest.
+#
+# It used to install dx-base-demo-core/-components/-templates for the template set alone. Resolved
+# without a version those pick a snapshot that does not start on a clean 8.2.3, and starting it
+# means pulling a dozen further modules in dependency order (bootstrap3-core/-components, skins,
+# default-skins, bookmarks, font-awesome, grid, event, location, news, person, topstories) -- an
+# environment that fails to boot, in exchange for demo content no spec ever looked at.

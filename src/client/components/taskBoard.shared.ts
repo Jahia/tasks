@@ -6,7 +6,16 @@
  * has no import from @jahia/javascript-modules-library -- that library is
  * forbidden in the client bundle, and this file needs to be importable from
  * both sides.
+ *
+ * It is also where the board's two pure DURATION functions live (dueStatus and the waiting-age
+ * trio at the bottom), for a third reason: this module imports nothing at runtime, so those
+ * functions can be imported and exercised on their own -- which is what tests/cypress/e2e/
+ * task-duration.cy.ts does (#63). Anything in TaskBoard.client.tsx drags Moonstone in with it.
  */
+
+// Type-only, so nothing from the i18n bridge (a browser-global reader) is pulled into the server
+// bundle that imports this file for its query strings -- same reason task.shared.ts does it.
+import type {Translate, TranslatePlural} from '../lib/i18n';
 
 // The board's own default scope: everything except finished tasks, so completed work doesn't
 // pile up in the list forever. Passed as an explicit filterState value (an existing but,
@@ -296,4 +305,87 @@ export function dueStatus(dueDate: string | null, state: string | null, now: num
     }
 
     return due < now ? 'overdue' : 'due';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Waiting duration
+// ---------------------------------------------------------------------------------------------
+
+// The Moonstone Chip colour vocabulary, restated here rather than imported: this file is
+// deliberately free of any Moonstone import (see the header), and waitingColor below has to name
+// the value it returns. TaskBoard.client.tsx imports this type back for its own state-chip map, so
+// there is still exactly one definition of it.
+export type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DAYS_PER_WEEK = 7;
+// Past this many whole days the duration reads in weeks instead of days, so a months-old task
+// says "9 weeks" rather than "64 days".
+export const WAITING_WEEKS_FROM_DAYS = 14;
+// Escalation thresholds. The colour is never the only carrier of this information -- the chip's
+// own text always states the duration, so the same escalation is readable without seeing colour.
+export const WAITING_WARNING_DAYS = 5;
+export const WAITING_DANGER_DAYS = 10;
+// createdDate is nullable (a task whose jcr:created can't be read), and this column has to sort
+// and render regardless: one sentinel, checked in both places, rather than a nullable number.
+export const WAITING_UNKNOWN = -1;
+
+/**
+ * Whole 24h periods elapsed since {@code createdDate}, not calendar days: "created 25 hours ago"
+ * is 1 day here even if that crosses two midnights. Deliberate -- this is an age/SLA indicator
+ * ("how long has this been sitting?"), and elapsed time is what that question means.
+ *
+ * "now" is an argument with a default, exactly as in dueStatus() above and for the same reason:
+ * the answer is a function of the instant it is asked about, so that instant has to be something
+ * a caller (or a check of this logic) can state rather than something read from the clock inside.
+ */
+export function waitingDaysSince(createdDate: string | null, now: number = Date.now()): number {
+    if (!createdDate) {
+        return WAITING_UNKNOWN;
+    }
+
+    const created = new Date(createdDate).getTime();
+    if (Number.isNaN(created)) {
+        return WAITING_UNKNOWN;
+    }
+
+    // Clamped at 0: a task whose jcr:created is slightly in the future (clock skew between the
+    // server that wrote it and the browser reading it) is "today", not a negative age.
+    return Math.max(0, Math.floor((now - created) / MS_PER_DAY));
+}
+
+// Pluralized through i18next's own count mechanism rather than a ternary, so each language applies
+// its OWN rule to the locale file's "<key>" / "<key>_plural" pair -- French, for instance, keeps
+// the singular at 0 ("0 jour"), which an English-shaped `days === 1 ? ... : ...` cannot express.
+export function waitingLabel(t: Translate, tPlural: TranslatePlural, days: number): string {
+    if (days === WAITING_UNKNOWN) {
+        return t('board.waiting.unknown', 'unknown');
+    }
+
+    if (days === 0) {
+        return t('board.waiting.today', 'today');
+    }
+
+    if (days < WAITING_WEEKS_FROM_DAYS) {
+        return tPlural('board.waiting.days', days, '{{count}} day', '{{count}} days');
+    }
+
+    const weeks = Math.floor(days / DAYS_PER_WEEK);
+    return tPlural('board.waiting.weeks', weeks, '{{count}} week', '{{count}} weeks');
+}
+
+export function waitingColor(days: number): ChipColor {
+    if (days === WAITING_UNKNOWN) {
+        return 'default';
+    }
+
+    if (days > WAITING_DANGER_DAYS) {
+        return 'danger';
+    }
+
+    if (days > WAITING_WARNING_DAYS) {
+        return 'warning';
+    }
+
+    return 'default';
 }
