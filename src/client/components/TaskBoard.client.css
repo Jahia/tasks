@@ -98,9 +98,15 @@
     max-width: 100%;
 }
 
+/* min-width is the sum of the fixed columns (Due 140 + Priority 120 + Waiting 120 + Owner 160 +
+   State 120 + Actions 280 = 940) plus the Task column's own min-width (200) minus a little
+   slack -- below it the board scrolls horizontally rather than letting the rows wrap. Raised from
+   760px when Due and Priority were added (#66): every fixed column added here has to be added to
+   this number too, or the new columns eat the flexible Task column instead of extending the
+   table. */
 .task-board__content table {
     width: 100%;
-    min-width: 760px;
+    min-width: 1020px;
 }
 
 .task-board__content thead tr,
@@ -138,15 +144,33 @@
     gap: var(--spacing-small);
 }
 
-/* The linked target page's own title, shown beside the task title -- distinct from the rest of
-   the cell's plain text, since it's the one piece of it that's actually clickable. */
-.task-board__target-link {
+/* The Due column's cell: date, then the "Overdue" chip and the iCal link underneath it. Stacked
+   rather than inline because the column is 140px and a chip beside a date would overflow it;
+   align-items keeps the chip from stretching to the full cell width. */
+.task-board__due-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+/* The linked target page's own title, shown beside the task title, and the Due cell's iCalendar
+   link -- distinct from the rest of the plain cell text, since they're the clickable parts. */
+.task-board__target-link,
+.task-board__ics-link {
     color: var(--color-accent_dark120, var(--color-accent));
     text-decoration: none;
 }
 
-.task-board__target-link:hover {
+.task-board__target-link:hover,
+.task-board__ics-link:hover {
     text-decoration: underline;
+}
+
+/* The iCal link is secondary to the date above it -- same caption size as the Task cell's
+   created-by line, so it doesn't compete with the date for attention. */
+.task-board__ics-link {
+    font-size: var(--fontSize-caption, 0.75rem);
 }
 
 .task-board__meta,

@@ -209,10 +209,27 @@
                              the exact same failure mode as the two imports above, just discovered
                              the hard way (a live "field 'taskBoard' is not defined" instead of an
                              install-time or class-load error). -->
+                        <!-- The three org.jahia.taglibs packages jnt_task/ics/task.jsp needs through
+                             the "http://www.jahia.org/tags/jcr" taglib: .jcr.node holds the tag
+                             handler it uses (JCRNodeTag) and the EL functions it calls
+                             (JCRTagUtils), and .jcr / (root) hold that handler's superclasses
+                             (AbstractJCRTag, AbstractJahiaTag), which the JSP compiler has to
+                             resolve as well. A module's JSPs are compiled, and their tag handlers
+                             loaded, through the BUNDLE's classloader (see JahiaJspServletWrapper),
+                             and bnd's "*" wildcard never looks inside a .jsp, so without these the
+                             .ics view fails at render time on "Unable to load tag handler class"
+                             (then, with only the leaf package, on its unresolvable supertype),
+                             which is exactly what it did before #66 wired that view into the
+                             board. Imported without a version range on purpose: the exporting
+                             bundle (org.jahia.server.jahia-taglib) versions these with the Jahia
+                             release it ships in, so a range here would pin the module to one. -->
                         <Import-Package>
                             graphql.annotations.annotationTypes;version="[21.1,22)",
                             graphql.annotations.connection;version="[21.1,22)",
                             org.jahia.defaults.config.spring,
+                            org.jahia.taglibs,
+                            org.jahia.taglibs.jcr,
+                            org.jahia.taglibs.jcr.node,
                             org.jahia.utils.i18n,
                             *
                         </Import-Package>

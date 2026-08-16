@@ -24,6 +24,11 @@ export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
 // toggle whose label names the state reviewers actually look for.
 export const ALL_STATES = [...NOT_FINISHED_STATES, 'finished', 'cancelled'];
 
+// The two states a task STOPS at. Derived from the two lists above rather than restated, so a
+// state added to either one can't leave this set silently wrong -- it is what the overdue signal
+// below keys on ("past its due date" only means something while the task is still open).
+export const CLOSED_STATES = ALL_STATES.filter(state => !NOT_FINISHED_STATES.includes(state));
+
 // The board's own default sort: newest created first (jahia-private#5292), which is also the
 // server's own documented default (TaskBoardQueryExtensions#DEFAULT_SORT_PROPERTY). Sent
 // explicitly all the same, so the very first render already matches what the table's sorted
@@ -65,6 +70,9 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
             owner
             assigneeDisplayName
             state
+            dueDate
+            priority
+            icsUrl(language: $language)
             possibleOutcomeDetails(language: $language) {
                 name
                 displayLabel
@@ -191,6 +199,17 @@ export type TaskBoardNode = {
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
+    // ISO-8601 instant, as stored on the node's dueDate property; null for a task with no due
+    // date at all (which is most workflow tasks -- only jnt:task declares a default for it).
+    dueDate: string | null;
+    // "low" | "normal" | "high" -- jnt:task's own choicelist (definitions.cnd). Kept a plain
+    // string for the same reason viewerRole is: the server returns the stored value verbatim.
+    priority: string | null;
+    // Ready-made link to this task's iCalendar (.ics) rendering, built server-side (see
+    // GqlTaskBoard#getIcsUrl) because the context path and workspace/locale URL shape are the
+    // server's to know, not the island's. Null exactly when dueDate is null -- a VTODO without
+    // a DUE line is what that view would otherwise fail to render.
+    icsUrl: string | null;
     possibleOutcomeDetails: TaskBoardOutcome[];
     description: string | null;
     workflowSummary: string | null;
@@ -230,6 +249,46 @@ export type InitialTaskBoardQueryResult = {
     taskBoardCurrentUserKey: string;
     taskBoardCanReviewAll: boolean;
 };
+
+/**
+ * What a row's due date means right now:
+ * - "none": no due date at all (or an unparseable one) -- the Due cell renders empty.
+ * - "due": it has one, and nothing is wrong with it.
+ * - "overdue": the date has passed AND the task is still open.
+ *
+ * Lives here rather than in TaskBoard.client.tsx so it stays a pure, framework-free function of
+ * its three arguments -- next to the state vocabulary (CLOSED_STATES) it is defined against, and
+ * runnable on its own, unlike anything in a module that imports Moonstone. Rendering (formatting
+ * the date, choosing the chip) stays in the component; this decides only which of the three cases
+ * a row is in.
+ *
+ * "now" is an argument, not a Date.now() call inside: the whole point of this function is that its
+ * answer is a function of the instant it is asked about, so that instant has to be something a
+ * caller (or a check of this logic) can state.
+ */
+export type DueStatus = 'none' | 'due' | 'overdue';
+
+export function dueStatus(dueDate: string | null, state: string | null, now: number = Date.now()): DueStatus {
+    if (!dueDate) {
+        return 'none';
+    }
+
+    const due = new Date(dueDate).getTime();
+    if (Number.isNaN(due)) {
+        // An unparseable stored value is "no usable due date", not "overdue": the row still has to
+        // render, and flagging it red would be an assertion this function can't actually make.
+        return 'none';
+    }
+
+    // A finished or cancelled task is never overdue, however long ago its date passed: the work
+    // stopped, so the deadline stopped meaning anything. Only reachable with the board's "Show
+    // finished" toggle on, which is exactly when a screenful of red would be pure noise.
+    if (state !== null && CLOSED_STATES.includes(state)) {
+        return 'due';
+    }
+
+    return due < now ? 'overdue' : 'due';
+}
 
 /**
  * Which scope the board opens on: the first of "assigned to me" / "available to my group(s)" /

@@ -16,6 +16,7 @@ import {
     COMPLETE_TASK_MUTATION,
     DEFAULT_SORT_BY,
     DEFAULT_SORT_ORDER,
+    dueStatus,
     NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
     REVIEW_TASK_MUTATION,
@@ -43,6 +44,8 @@ const SEARCH_DEBOUNCE_MS = 350;
 const labels = {
     boardTitle: 'Tasks',
     columnTask: 'Task',
+    columnDue: 'Due',
+    columnPriority: 'Priority',
     columnWaiting: 'Waiting',
     columnOwner: 'Owner',
     columnState: 'State',
@@ -77,6 +80,16 @@ const labels = {
     commentPlaceholder: 'Comment (optional)',
     waitingToday: 'today',
     waitingUnknown: 'unknown',
+    // The overdue signal is this WORD, on a chip that is additionally red -- the colour repeats it,
+    // it never carries it alone (same rule the Waiting chip follows).
+    dueOverdue: 'Overdue',
+    // The iCalendar export (#66), restored from the legacy board. Short by necessity -- it sits in
+    // a 140px column under the date it exports -- with the sentence-long version as its tooltip.
+    actionIcs: 'iCal',
+    icsHint: 'Download this task as a calendar entry (.ics)',
+    priorityLow: 'Low',
+    priorityNormal: 'Normal',
+    priorityHigh: 'High',
     taskCount: (count: number) => `${count} task(s)`,
     waitingDays: (days: number) => (days === 1 ? '1 day' : `${days} days`),
     waitingWeeks: (weeks: number) => (weeks === 1 ? '1 week' : `${weeks} weeks`),
@@ -162,6 +175,52 @@ function waitingColor(days: number): ChipColor {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Due date and priority (#66)
+// ---------------------------------------------------------------------------------------------
+
+// Shorter than CREATED_DATE_FORMAT below ("Aug 15, 2026", not "August 15, 2026"): this one has to
+// fit a 140px column that also carries the overdue chip and the iCal link, while the created date
+// sits on its own line in the flexible Task column. Same module-scope-singleton reason as that one.
+const DUE_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'short', day: 'numeric'});
+// The full stored instant, shown only as the cell's tooltip: the visible date is deliberately
+// day-precision, so a task due at 01:00 today reads "Aug 16, 2026" while already being overdue.
+// The tooltip is where that apparent contradiction is resolved, without widening the column.
+const DUE_DATE_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {dateStyle: 'medium', timeStyle: 'short'});
+
+// Shared by all three formatters on this board (the two above and the created date further down):
+// same null/unparseable handling for every stored date, differing only in the format applied.
+function formatDate(format: Intl.DateTimeFormat, iso: string | null): string | null {
+    if (!iso) {
+        return null;
+    }
+
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    return format.format(date);
+}
+
+// The stored choicelist values (definitions.cnd: 'low', 'normal', 'high') as display labels. An
+// unrecognized value falls back to itself, capitalized, rather than being dropped -- the property
+// is a plain string server-side, so a task written by something other than this UI can hold one.
+const PRIORITY_LABELS: Record<string, string> = {
+    low: labels.priorityLow,
+    normal: labels.priorityNormal,
+    high: labels.priorityHigh
+};
+
+// Priority is carried by the WORD ("High"/"Normal"/"Low"), which is always rendered; the weight
+// only makes the extremes easier to pick out while scanning the column. Nothing here is
+// colour-only, and nothing is weight-only either.
+const PRIORITY_WEIGHT: Record<string, 'light' | 'default' | 'semiBold'> = {
+    low: 'light',
+    normal: 'default',
+    high: 'semiBold'
+};
+
+// ---------------------------------------------------------------------------------------------
 // Sorting: table columns <-> server sort arguments
 // ---------------------------------------------------------------------------------------------
 
@@ -175,14 +234,23 @@ type TaskRow = TaskBoardNode & {
     actions: null;
 };
 
-type SortableColumn = 'title' | 'waitingDays' | 'owner' | 'state';
+type SortableColumn = 'title' | 'dueDate' | 'waitingDays' | 'owner' | 'state';
 
 // Which taskBoard(sortBy:) argument each sortable column maps to. 'waitingDays' is the only one
 // that isn't a straight rename: waiting duration isn't stored anywhere, it's derived from
 // jcr:created, and the server sorts on the raw property (which is also what keeps this column on
-// the query-level fast path, #64 -- the other three are resolved-value sorts and scan).
+// the query-level fast path, #64 -- title/owner/state are resolved-value sorts and scan).
+// 'dueDate' is a raw property too, and is on the server's own sort allow-list already (see
+// TaskBoardQueryExtensions#ALLOWED_SORT_PROPERTIES), so it joins jcr:created on the fast path.
+//
+// Priority is deliberately NOT here: it is a stored property, but not an allow-listed one, and the
+// server maps anything unrecognized back to its default sort rather than erroring -- so declaring
+// the column sortable would give a header that silently reorders by creation date instead. Making
+// it sort means adding "priority" to that allow-list (and deciding what its order even means:
+// low/normal/high sorts alphabetically as high < low < normal, which is not the useful order).
 const COLUMN_SORT_ARGUMENT: Record<SortableColumn, string> = {
     title: 'title',
+    dueDate: 'dueDate',
     waitingDays: 'jcr:created',
     owner: 'owner',
     state: 'state'
@@ -190,6 +258,7 @@ const COLUMN_SORT_ARGUMENT: Record<SortableColumn, string> = {
 
 const SORT_ARGUMENT_COLUMN: Record<string, SortableColumn> = {
     title: 'title',
+    dueDate: 'dueDate',
     'jcr:created': 'waitingDays',
     owner: 'owner',
     state: 'state'
@@ -261,16 +330,7 @@ const REJECT_OUTCOME_PATTERN = /reject|refuse|deny|decline/i;
 const CREATED_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'});
 
 function formatCreatedDate(iso: string | null): string | null {
-    if (!iso) {
-        return null;
-    }
-
-    const date = new Date(iso);
-    if (Number.isNaN(date.getTime())) {
-        return null;
-    }
-
-    return CREATED_DATE_FORMAT.format(date);
+    return formatDate(CREATED_DATE_FORMAT, iso);
 }
 
 type MenuAction = {
@@ -485,6 +545,50 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     );
 }
 
+type DueCellProps = {
+    dueDate: string | null;
+    state: string | null;
+    icsUrl: string | null;
+};
+
+// The Due column's cell (#66): the date, an "Overdue" chip once it has passed on a task that is
+// still open, and the iCalendar export the legacy board offered whenever a due date was set.
+//
+// The export link lives HERE rather than among the row's actions: it exists if and only if the
+// task has a due date, which is exactly what this cell is about, and the Actions column is
+// already the busiest one on the board. It is also not an action on the task -- nothing about the
+// task changes -- so putting it beside Assign/Start/Suspend would misrepresent it.
+//
+// Renders nothing at all when there is no due date: an empty cell says "no deadline" more
+// directly than a placeholder dash, and most workflow tasks have none.
+function DueCell({dueDate, state, icsUrl}: Readonly<DueCellProps>) {
+    const formatted = formatDate(DUE_DATE_FORMAT, dueDate);
+    if (!formatted) {
+        // No due date, or one that can't be parsed -- the same two cases dueStatus() calls "none".
+        return null;
+    }
+
+    const status = dueStatus(dueDate, state);
+
+    return (
+        <div className="task-board__due-cell" title={formatDate(DUE_DATE_TIME_FORMAT, dueDate) ?? undefined}>
+            <Typography variant="body">{formatted}</Typography>
+            {status === 'overdue' && <Chip label={labels.dueOverdue} color="danger"/>}
+            {icsUrl && (
+                <a
+                    className="task-board__ics-link"
+                    href={icsUrl}
+                    title={labels.icsHint}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    {labels.actionIcs}
+                </a>
+            )}
+        </div>
+    );
+}
+
 type TaskCellProps = {
     task: TaskRow;
     showCandidates: boolean;
@@ -675,6 +779,29 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             // someone's or listed alongside tasks that aren't offered to anyone in particular,
             // and a "who else could take this" line would just be noise.
             render: ({data}) => <TaskCell task={data} showCandidates={scope === SCOPE_CLAIMABLE}/>
+        },
+        {
+            key: 'dueDate',
+            label: labels.columnDue,
+            // Wider than the other fixed columns: the cell stacks a date, an "Overdue" chip and
+            // the iCal link, and 120px would break "Aug 15, 2026" across two lines.
+            width: '140px',
+            // Sorted server-side on the raw dueDate property, which is on its allow-list and so
+            // stays on the query-level fast path (#64) -- see COLUMN_SORT_ARGUMENT.
+            isSortable: true,
+            render: ({data}) => <DueCell dueDate={data.dueDate} state={data.state} icsUrl={data.icsUrl}/>
+        },
+        {
+            key: 'priority',
+            label: labels.columnPriority,
+            width: '120px',
+            // Deliberately NOT sortable -- see COLUMN_SORT_ARGUMENT for why (the server has no
+            // allow-list entry for it, and would silently fall back to its default ordering).
+            render: ({data}) => (data.priority ? (
+                <Typography variant="body" weight={PRIORITY_WEIGHT[data.priority] ?? 'default'}>
+                    {PRIORITY_LABELS[data.priority] ?? capitalize(data.priority)}
+                </Typography>
+            ) : null)
         },
         {
             key: 'waitingDays',
