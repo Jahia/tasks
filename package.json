@@ -22,6 +22,24 @@
     "so the board cannot use the shell's copy and must bundle its own -- privately, see the crash",
     "described in the fix commit for #61."
   ],
+  "_comment-toolchain-pins": [
+    "vite, @jahia/vite-federation-plugin and the @module-federation/vite resolution below are",
+    "pinned to EXACT versions, and they are pinned together: this trio is the toolchain",
+    "formidable-engine ships, and it is the only combination proven to bridge Jahia's webpack-5",
+    "app shell. Do not float them.",
+    "@module-federation/vite <= 1.14 emits share stubs that TOP-LEVEL AWAIT the federation",
+    "runtime (`await runtimeInit.then(rt => rt.loadShare('react', ...))`), so nothing touches a",
+    "shared module before the host's share scope has actually been bridged. From 1.16 it emits a",
+    "SYNCHRONOUS globalThis.__mf_module_cache__ probe instead, which cannot wait for an async",
+    "bridge and takes the whole Jahia UI down at boot (see the fix commit for #61).",
+    "That rewrite is not gratuitous: rolldown, which is Vite 8's bundler, REFUSES the awaiting",
+    "form -- `vite build` fails with [REQUIRE_TLA] because react/cjs/react-jsx-runtime.production",
+    ".min.js reaches the stub through a CommonJS require(). So the safe stub requires Vite 7, and",
+    "Vite 8 requires the unsafe stub; the two pins are one decision, not two. Revisit only when a",
+    "@module-federation/vite release resolves shares asynchronously under rolldown as well.",
+    "The pins hold both builds back to Vite 7, the SSR/islands one included; @jahia/vite-plugin",
+    "supports it (peer: vite >= 6.0.0)."
+  ],
   "dependencies": {
     "@jahia/ui-extender": "^1.2.0",
     "react": "^18.3.1",
@@ -32,14 +50,14 @@
     "@jahia/javascript-modules-library": "^1.2.0",
     "@jahia/moonstone": "^2.20.3",
     "@jahia/moonstone-alpha": "^1.0.1",
-    "@jahia/vite-federation-plugin": "^0.1.3",
+    "@jahia/vite-federation-plugin": "0.1.1",
     "@jahia/vite-plugin": "^1.2.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "eslint": "^9.39.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.65.0",
-    "vite": "^8.0.14"
+    "vite": "7.3.5"
   },
   "packageManager": "yarn@1.22.22",
   "engines": {
@@ -54,5 +72,8 @@
     "remotes": {
       "jahia": "javascript/apps/remoteEntry.js"
     }
+  },
+  "resolutions": {
+    "@module-federation/vite": "1.12.3"
   }
 }

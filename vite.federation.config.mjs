@@ -6,12 +6,15 @@
 // the two have nothing in common but the source tree: different entry, different output layout,
 // different runtime contract. `yarn build` runs both, in that order.
 //
-// Replaces webpack.config.cjs + webpack.shared.cjs (#61). The skeleton is the one used by Jahia's
-// own already-migrated remotes -- copy-to-other-languages (the reference migration, PR #109),
-// formidable-engine and kfind: outDir straight into src/main/resources/javascript/apps and a
-// single './init' expose. The `shared` block, which those three do not have, is where this module
-// deliberately parts company with them; the long comment on it says why, and it is not optional --
-// without it this remote takes the whole Jahia admin UI down at boot.
+// Replaces webpack.config.cjs + webpack.shared.cjs (#61). This file is deliberately a copy of
+// formidable-engine's vite.config.ts -- outDir straight into src/main/resources/javascript/apps,
+// a single './init' expose, no `shared` overrides -- because formidable-engine is the one Vite
+// federation remote observed working against Jahia's webpack-5 app shell on the jahia-cortex bench.
+// What makes that work is not this file but the TOOLCHAIN VERSIONS it is built with, which
+// package.json pins to formidable's exactly; read the "_comment-toolchain-pins" note there before
+// touching vite, @jahia/vite-federation-plugin or the @module-federation/vite resolution. Two
+// earlier shapes of this config, both plausible, both took the entire Jahia admin UI down at boot
+// on a newer toolchain -- see the commit history for #61.
 import {defineConfig} from 'vite';
 import jahiaFederation from '@jahia/vite-federation-plugin';
 
@@ -43,43 +46,22 @@ export default defineConfig({
             exposes: {
                 './init': './src/javascript/init.tsx'
             },
-            // Only what the app shell actually provides is shared, and it is shared with NO local
-            // fallback. `import: false` is module-federation's "the host must supply this" flag,
-            // and the plugin honours it by skipping the prebuilt local copy entirely
-            // (@module-federation/vite: `if (shareItem.shareConfig?.import !== false)
-            // writePreBuildLibPath(...)`). jahia-ui-root publishes react 18.3.1, react-dom 18.3.1
-            // and @jahia/ui-extender 1.0.6, so all three resolve; nothing else is shared, because
-            // the auto-share list is exactly package.json's "dependencies" and Moonstone was moved
-            // out of it (see the note there).
+            // No `shared` block: the auto-share list (package.json "dependencies") is already
+            // exactly react / react-dom / @jahia/ui-extender, the three packages jahia-ui-root
+            // publishes, and the plugin registers each as {singleton: true, strictVersion: false,
+            // requiredVersion: <declared range>} -- byte-for-byte the shareConfig formidable-engine
+            // registers on this same bench and shell. Moonstone is absent from that list because it
+            // is a devDependency (see package.json): the shell only has 2.14.2, which lacks Banner,
+            // DataTable and EmptyData, so the board must bundle 2.20.3 privately. Private is also
+            // strictly safer -- a privately bundled library is a plain import, never a participant
+            // in the share runtime.
             //
-            // Why no fallbacks, rather than the singleton-with-fallback the reference modules use:
-            // the fallbacks are what crashed the shell. The generated share-materialisation code
-            // is fully SYNCHRONOUS -- for each share it reads
-            // globalThis.__mf_module_cache__.share['default:<pkg>'], falls back to the bundled copy
-            // only when that read is `undefined`, and then immediately dereferences the result
-            // (`e.useEffect`, `e.AbTesting`, ...). Bridging a webpack host's share scope is
-            // asynchronous, so that cache slot can hold a not-yet-resolved value; `null` is not
-            // `undefined`, the fallback branch does not fire, and the dereference throws
-            // "Cannot read properties of null (reading 'useEffect')" out of remoteEntry.init() --
-            // which the shell awaits during boot, so the whole /jahia UI hangs on "Loading Jahia",
-            // not just this module's tab. Observed on jahia-cortex, 2026-08-16.
-            //
-            // With no local copies to materialise there is nothing for the shell's own instances to
-            // race against, which is also the July 2026 smart-images lesson stated the other way
-            // round: libraries the host CAN provide are taken from the host and never duplicated;
-            // libraries the host CANNOT provide (Moonstone here) are bundled privately and stay out
-            // of the share runtime altogether.
-            //
-            // @jahia/ui-extender must be the host's instance regardless of crash-safety: init.tsx
-            // registers the 'tasks' adminRoute into the registry the shell later reads, and a
-            // private registry object would simply never surface the tab. 1.0.6 carries the same
-            // registry API this module uses (add/addOrReplace/clear/find/get/remove -- checked
-            // against the published 1.0.6 tarball), so consuming the older host copy is safe.
-            shared: {
-                react: {singleton: true, import: false},
-                'react-dom': {singleton: true, import: false},
-                '@jahia/ui-extender': {singleton: true, import: false}
-            },
+            // Do NOT reach for `import: false` here. It reads like the obvious way to guarantee the
+            // host's copy wins, and on this webpack-5 shell it fails outright: the runtime cannot
+            // bridge a webpack share scope for a share it has no local provider for, and every one
+            // of the three dies with "Failed to bridge external shared module" /
+            // "Shared module 'react' must be provided by host", taking the shell's boot with it.
+            // Measured on jahia-cortex, 2026-08-16.
             dts: false // No @mf-types.zip / @mf-types.d.ts: nothing federates types off this module.
         })
     ]
