@@ -6,10 +6,12 @@
 // the two have nothing in common but the source tree: different entry, different output layout,
 // different runtime contract. `yarn build` runs both, in that order.
 //
-// Replaces webpack.config.cjs + webpack.shared.cjs (#61). The shape below is the one used by
-// Jahia's own already-migrated remotes -- copy-to-other-languages (the reference migration,
-// PR #109), formidable-engine and kfind: outDir straight into src/main/resources/javascript/apps,
-// a single './init' expose, and everything else left to @jahia/vite-federation-plugin.
+// Replaces webpack.config.cjs + webpack.shared.cjs (#61). The skeleton is the one used by Jahia's
+// own already-migrated remotes -- copy-to-other-languages (the reference migration, PR #109),
+// formidable-engine and kfind: outDir straight into src/main/resources/javascript/apps and a
+// single './init' expose. The `shared` block, which those three do not have, is where this module
+// deliberately parts company with them; the long comment on it says why, and it is not optional --
+// without it this remote takes the whole Jahia admin UI down at boot.
 import {defineConfig} from 'vite';
 import jahiaFederation from '@jahia/vite-federation-plugin';
 
@@ -41,22 +43,43 @@ export default defineConfig({
             exposes: {
                 './init': './src/javascript/init.tsx'
             },
-            // No `shared` overrides on purpose -- same as copy-to-other-languages and
-            // formidable-engine. The plugin already shares EVERY package.json dependency as a
-            // module-federation `singleton` (with requiredVersion derived from the declared
-            // range), which is exactly, key for key, what the deleted webpack.shared.cjs spelled
-            // out by hand for react / react-dom / @jahia/ui-extender / @jahia/moonstone. Singleton
-            // is the part that matters: the app shell (jahia-ui-root) publishes its own react,
-            // react-dom, @jahia/moonstone and @jahia/ui-extender into the share scope, and a
-            // singleton share resolves to ONE instance across host and remote, so the copies
-            // bundled here are inert fallbacks for the "nobody else provided it" case rather than
-            // a second React able to shadow the host's. (A remote that shares its dependencies
-            // WITHOUT singleton semantics is what produced the "useContext of null" dual-React
-            // crashes seen on another module in July 2026.)
+            // Only what the app shell actually provides is shared, and it is shared with NO local
+            // fallback. `import: false` is module-federation's "the host must supply this" flag,
+            // and the plugin honours it by skipping the prebuilt local copy entirely
+            // (@module-federation/vite: `if (shareItem.shareConfig?.import !== false)
+            // writePreBuildLibPath(...)`). jahia-ui-root publishes react 18.3.1, react-dom 18.3.1
+            // and @jahia/ui-extender 1.0.6, so all three resolve; nothing else is shared, because
+            // the auto-share list is exactly package.json's "dependencies" and Moonstone was moved
+            // out of it (see the note there).
             //
-            // @jahia/ui-extender in particular MUST end up as the host's instance: init.tsx
+            // Why no fallbacks, rather than the singleton-with-fallback the reference modules use:
+            // the fallbacks are what crashed the shell. The generated share-materialisation code
+            // is fully SYNCHRONOUS -- for each share it reads
+            // globalThis.__mf_module_cache__.share['default:<pkg>'], falls back to the bundled copy
+            // only when that read is `undefined`, and then immediately dereferences the result
+            // (`e.useEffect`, `e.AbTesting`, ...). Bridging a webpack host's share scope is
+            // asynchronous, so that cache slot can hold a not-yet-resolved value; `null` is not
+            // `undefined`, the fallback branch does not fire, and the dereference throws
+            // "Cannot read properties of null (reading 'useEffect')" out of remoteEntry.init() --
+            // which the shell awaits during boot, so the whole /jahia UI hangs on "Loading Jahia",
+            // not just this module's tab. Observed on jahia-cortex, 2026-08-16.
+            //
+            // With no local copies to materialise there is nothing for the shell's own instances to
+            // race against, which is also the July 2026 smart-images lesson stated the other way
+            // round: libraries the host CAN provide are taken from the host and never duplicated;
+            // libraries the host CANNOT provide (Moonstone here) are bundled privately and stay out
+            // of the share runtime altogether.
+            //
+            // @jahia/ui-extender must be the host's instance regardless of crash-safety: init.tsx
             // registers the 'tasks' adminRoute into the registry the shell later reads, and a
-            // private registry object would simply never surface the tab.
+            // private registry object would simply never surface the tab. 1.0.6 carries the same
+            // registry API this module uses (add/addOrReplace/clear/find/get/remove -- checked
+            // against the published 1.0.6 tarball), so consuming the older host copy is safe.
+            shared: {
+                react: {singleton: true, import: false},
+                'react-dom': {singleton: true, import: false},
+                '@jahia/ui-extender': {singleton: true, import: false}
+            },
             dts: false // No @mf-types.zip / @mf-types.d.ts: nothing federates types off this module.
         })
     ]

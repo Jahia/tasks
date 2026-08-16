@@ -10,9 +10,19 @@
     "dev:federation": "vite build --config vite.federation.config.mjs --watch",
     "lint": "eslint ."
   },
+  "_comment-dependencies": [
+    "This split is NOT the usual runtime-vs-tooling one, and moving a package across it changes",
+    "what the browser runs. @jahia/vite-federation-plugin turns every key of \"dependencies\" into",
+    "a module-federation SHARE (see vite.federation.config.mjs), i.e. a package the app shell is",
+    "expected to hand us at runtime; everything else is bundled privately. Every package here is",
+    "bundled into dist/ by the SSR/islands build either way, so \"dependencies\" here means",
+    "\"provided by the app shell\", not \"needed at runtime\".",
+    "@jahia/moonstone and @jahia/moonstone-alpha therefore sit in devDependencies on purpose: the",
+    "shell only publishes Moonstone 2.14.2, which exports neither Banner, DataTable nor EmptyData,",
+    "so the board cannot use the shell's copy and must bundle its own -- privately, see the crash",
+    "described in the fix commit for #61."
+  ],
   "dependencies": {
-    "@jahia/moonstone": "^2.20.3",
-    "@jahia/moonstone-alpha": "^1.0.1",
     "@jahia/ui-extender": "^1.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -20,6 +30,8 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@jahia/javascript-modules-library": "^1.2.0",
+    "@jahia/moonstone": "^2.20.3",
+    "@jahia/moonstone-alpha": "^1.0.1",
     "@jahia/vite-federation-plugin": "^0.1.3",
     "@jahia/vite-plugin": "^1.2.0",
     "@types/react": "^18.3.28",
