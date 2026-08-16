@@ -44,7 +44,12 @@ final class TaskBoardRequestContext {
 
     // userKey (a JCR path for a user or a group) -> display name. Shared by the search filter,
     // the resolved-value sort and the per-row assignee/candidate fields, all of which resolve the
-    // same handful of assignees over and over across a page of tasks.
+    // same handful of principals over and over across a page of tasks.
+    //
+    // One map, several QUESTIONS about the same paths: the assignee/start-user fields want the
+    // account's node name, the candidate labels want its displayable name (#60). Callers that ask
+    // a different question namespace their key -- see GqlTaskBoard#resolveCandidateDisplayName --
+    // so a path resolved for one field can't be served back to the other.
     private final Map<String, String> displayNames = Collections.synchronizedMap(new HashMap<>());
 
     // provider + '|' + processId -> Workflow (nullable). Every workflow task of the same process
@@ -64,21 +69,24 @@ final class TaskBoardRequestContext {
     }
 
     /**
-     * Memoized {@code userKey -> display name}. {@code resolver} is only invoked on a miss, so a
+     * Memoized {@code memoKey -> display name}. {@code resolver} is only invoked on a miss, so a
      * board page whose 25 rows are all assigned to the same person performs one JCR lookup rather
      * than 25 (and the resolved-value "owner" sort, which extracts a key per row across the whole
      * result set, performs one per distinct assignee rather than one per task).
+     *
+     * <p>{@code memoKey} is the user key itself for the account-name lookups, and a namespaced
+     * form of it for anything resolving the same path a different way (see the field above).
      */
-    String displayName(String userKey, DisplayNameResolver resolver) throws RepositoryException {
+    String displayName(String memoKey, DisplayNameResolver resolver) throws RepositoryException {
         // Not computeIfAbsent: the resolver throws a checked RepositoryException, and a miss here
         // is cheap enough that the get/resolve/put race (two threads resolving the same key to
         // the same value) is harmless.
-        String cached = displayNames.get(userKey);
+        String cached = displayNames.get(memoKey);
         if (cached != null) {
             return cached;
         }
-        String resolved = resolver.resolve(userKey);
-        displayNames.put(userKey, resolved);
+        String resolved = resolver.resolve(memoKey);
+        displayNames.put(memoKey, resolved);
         return resolved;
     }
 
@@ -104,9 +112,13 @@ final class TaskBoardRequestContext {
         return workflow;
     }
 
-    /** Lets {@link GqlTaskBoard} keep owning how a user key actually resolves to a node name. */
+    /**
+     * Lets {@link GqlTaskBoard} keep owning how a principal path actually resolves to a label.
+     * Handed the memo key, which the namespacing callers ignore in favour of the path they
+     * captured.
+     */
     @FunctionalInterface
     interface DisplayNameResolver {
-        String resolve(String userKey) throws RepositoryException;
+        String resolve(String memoKey) throws RepositoryException;
     }
 }
