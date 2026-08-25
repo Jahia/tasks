@@ -11,5 +11,5 @@
         "forceConsistentCasingInFileNames": true,
         "noEmit": true
     },
-    "include": ["src/client", "src/react", "src/javascript"]
+    "include": ["src/client", "src/javascript"]
 }

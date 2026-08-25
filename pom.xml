@@ -55,7 +55,7 @@
     <version>9.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <name>Jahia Tasks</name>
-    <description>Jahia template module for leveraging simple user and shared task management, with a React/Moonstone task board view for jnt:currentUserTasks.</description>
+    <description>Jahia template module for leveraging simple user and shared task management, with a React/Moonstone task board in the administration dashboard.</description>
     <scm>
         <connection>scm:git:git@github.com:Jahia/tasks.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/tasks.git</developerConnection>
@@ -123,28 +123,24 @@
                 <version>3.2.0</version>
                 <configuration>
                     <!--
-                        Both halves of 'yarn clean' (see package.json), not just the first.
-                        Both build outputs live outside target/: dist/ (the SSR + islands build) and
-                        src/main/resources/javascript/apps/ (the federation remote). The plugin's
-                        own default only reaches target/, so `mvn clean` would otherwise leave them
-                        entirely alone.
-                        The second fileset earns its keep: the builds write content-hashed chunk
-                        names, so every build that changes a byte of the entry produces a new set
-                        of filenames, and Include-Resource folds whatever sits in that directory
-                        into the jar whole. Under the old webpack build (removed in #61) nothing
-                        deleted the superseded ones and a `mvn clean install` shipped 18 dead chunks
-                        alongside the live ones (observed 2026-08-16), each a full copy of the
-                        board, so a string search over the jar could only ever return the union of
-                        every build ever run in that checkout. Vite now empties the directory itself
-                        (build.emptyOutDir in vite.federation.config.mjs), which covers the plain
-                        `yarn build` case too; this fileset stays as the guarantee that a
-                        `mvn clean` really does leave a bare tree, independent of what the
-                        JS toolchain of the day happens to do.
+                        The same directory 'yarn clean' removes (see package.json). The build
+                        output lives outside target/, in src/main/resources/javascript/apps/, and
+                        the plugin's own default only reaches target/, so `mvn clean` would
+                        otherwise leave it entirely alone.
+                        It earns its keep: the build writes content-hashed chunk names, so every
+                        build that changes a byte of the entry produces a new set of filenames, and
+                        Include-Resource folds whatever sits in that directory into the jar whole.
+                        Under the old webpack build (removed in #61) nothing deleted the superseded
+                        ones and a `mvn clean install` shipped 18 dead chunks alongside the live
+                        ones (observed 2026-08-16), each a full copy of the board, so a string
+                        search over the jar could only ever return the union of every build ever run
+                        in that checkout. Vite now empties the directory itself (build.emptyOutDir
+                        in vite.config.mjs), which covers the plain `yarn build` case too; this
+                        fileset stays as the guarantee that a `mvn clean` really does leave a bare
+                        tree, independent of what the JS toolchain of the day happens to do.
+                        (A second fileset for dist/ went with the server-rendered build in #69.)
                     -->
                     <filesets>
-                        <fileset>
-                            <directory>${project.basedir}/dist/</directory>
-                        </fileset>
                         <fileset>
                             <directory>${project.basedir}/src/main/resources/javascript/apps/</directory>
                         </fileset>
@@ -189,8 +185,9 @@
                     </execution>
                     <execution>
                         <!-- Bound to prepare-package (not package) so the Vite build has
-                             produced dist/ before maven-bundle-plugin's package-phase
-                             "bundle" goal folds it into the jar via Include-Resource below. -->
+                             written src/main/resources/javascript/apps/ before
+                             maven-bundle-plugin's package-phase "bundle" goal folds it into the
+                             jar via {maven-resources}. -->
                         <id>yarn build - tasks</id>
                         <phase>prepare-package</phase>
                         <goals>
@@ -264,13 +261,17 @@
                             org.jahia.utils.i18n,
                             *
                         </Import-Package>
-                        <!-- Fold the built React/Moonstone view (package.json + Vite's dist/
-                             output) into the jar root, alongside the compiled classes, so
-                             javascript-modules-engine can discover it in the same bundle. -->
+                        <!-- package.json travels into the jar root because the app shell reads
+                             its "jahia.remotes" entry to find the federation remote. The remote's
+                             own bundle needs nothing here: Vite writes it under
+                             src/main/resources/javascript/apps, which {maven-resources} already
+                             folds in. (Until #69 this also carried "dist=dist", the server bundle
+                             and hydration assets javascript-modules-engine discovered; that
+                             server-rendered path is gone and the module no longer involves the
+                             engine at all.) -->
                         <Include-Resource>
                             {maven-resources},
-                            package.json=package.json,
-                            dist=dist
+                            package.json=package.json
                         </Include-Resource>
                     </instructions>
                 </configuration>

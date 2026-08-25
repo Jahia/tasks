@@ -1,20 +1,19 @@
 /**
- * Query/mutation strings and result types shared between the SSR view
- * (CurrentUserTasksView.server.tsx, which fetches the initial page through
- * useGQLQuery) and the client island (TaskBoard.client.tsx, which fetches
- * subsequent pages and runs mutations through plain fetch()). Deliberately
- * has no import from @jahia/javascript-modules-library -- that library is
- * forbidden in the client bundle, and this file needs to be importable from
- * both sides.
+ * The board's GraphQL documents and result types, plus its pure DURATION functions (dueStatus and
+ * the waiting-age trio at the bottom).
  *
- * It is also where the board's two pure DURATION functions live (dueStatus and the waiting-age
- * trio at the bottom), for a third reason: this module imports nothing at runtime, so those
- * functions can be imported and exercised on their own -- which is what tests/cypress/e2e/
- * task-duration.cy.ts does (#63). Anything in TaskBoard.client.tsx drags Moonstone in with it.
+ * Split out of TaskBoard.client.tsx rather than living beside the markup because this module pulls
+ * in nothing but @apollo/client, so the duration functions can be imported and exercised on their
+ * own -- which is what tests/cypress/e2e/task-duration.cy.ts does (#63), with no browser and no
+ * Jahia. Anything in TaskBoard.client.tsx drags Moonstone in with it.
+ *
+ * Until #69 the split had a second, harder reason: these documents were also read by the
+ * server-rendered jnt:currentUserTasks view, which was forbidden from importing anything the
+ * client bundle touched. That view is gone, and the board and its dashboard entry point are now
+ * the only readers.
  */
 
-// Type-only, so nothing from the i18n bridge (a browser-global reader) is pulled into the server
-// bundle that imports this file for its query strings -- same reason task.shared.ts does it.
+import {gql} from '@apollo/client';
 import type {Translate, TranslatePlural} from '../lib/i18n';
 
 // The board's own default scope: everything except finished tasks, so completed work doesn't
@@ -64,7 +63,11 @@ export type TaskScope = typeof SCOPE_ASSIGNED_TO_ME | typeof SCOPE_CLAIMABLE | t
 // Every field a board row needs, written once and spliced into both queries below -- the initial
 // fetch and the paging/filtering one ask for identical rows, and a row field added to one of them
 // only is a row that renders differently before and after the first interaction.
-const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
+//
+// A plain template string, NOT a gql document: this is a selection SET, not a standalone
+// operation, so gql would reject it outright ("Syntax Error: Unexpected Name \"pageInfo\""). It is
+// interpolated into the two gql documents below, where graphql-tag concatenates it before parsing.
+const TASK_BOARD_PAGE_SELECTION = `
     pageInfo {
         hasNextPage
         endCursor
@@ -113,7 +116,7 @@ const TASK_BOARD_PAGE_SELECTION = /* GraphQL */ `
     }
 `;
 
-export const TASK_BOARD_QUERY = /* GraphQL */ `
+export const TASK_BOARD_QUERY = gql`
     query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String, $language: String) {
         taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState, scope: $scope) {
             ${TASK_BOARD_PAGE_SELECTION}
@@ -124,22 +127,22 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 // Which scope the board opens on: "All tasks", always (#61). Every viewer sees the whole board
 // they are entitled to see first, and narrows it themselves with the scope tabs -- rather than
 // landing on a pre-filtered subset whose emptiness (or smallness) reads as "there is nothing
-// here" when there usually is. Kept a named constant rather than inlined at both entry points, so
-// the client default and the initial query below can't drift apart.
+// here" when there usually is. Kept a named constant rather than inlined, so the board's own
+// default scope and the initial query below can't drift apart.
 //
 // Replaces #61's pickInitialScope(), which opened on the first NON-EMPTY of assignedToMe /
 // claimable / all. That function was the only consumer of the other two scopes' pages, so
 // dropping it also drops two thirds of the initial query -- see below.
 //
-// Typed as the literal scope it is, NOT widened to TaskScope: both entry points index the initial
-// result with it (result[INITIAL_SCOPE]), and that result only carries the one scope's page --
-// widening the type here would make those lookups an "implicitly any" compile error rather than
-// the checked field access they are.
+// Typed as the literal scope it is, NOT widened to TaskScope: TasksDashboardApp indexes the
+// initial result with it (result[INITIAL_SCOPE]), and that result only carries the one scope's
+// page -- widening the type here would make that lookup an "implicitly any" compile error rather
+// than the checked field access it is.
 export const INITIAL_SCOPE: typeof SCOPE_ALL = SCOPE_ALL;
 
-// Used only by the two entry points for the first page: adds the viewer fields the client island
-// needs for its action display logic (see TaskBoardQueryExtensions#taskBoardCurrentUserKey/
-// #taskBoardCanReviewAll), and fetches page 1 of the scope the board opens on.
+// The dashboard route's first page: adds the viewer fields the board needs for its action
+// display logic (see TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll),
+// and fetches page 1 of the scope the board opens on.
 //
 // ONE page, not the three aliased ones #61 fetched. Those three existed solely to decide the
 // opening scope from real rows; with that decision now fixed at INITIAL_SCOPE, the other two
@@ -148,10 +151,10 @@ export const INITIAL_SCOPE: typeof SCOPE_ALL = SCOPE_ALL;
 // re-fetches page 1 of the new scope anyway (the effect on `scope` in that file), so there was no
 // instant-switch cache to preserve either.
 //
-// Still an aliased field rather than a plain `taskBoard`, so the result keeps the shape both
-// entry points index with (result[INITIAL_SCOPE]) and a second scope could be added back here
-// without changing them.
-export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
+// Still an aliased field rather than a plain `taskBoard`, so the result keeps the shape
+// TasksDashboardApp indexes with (result[INITIAL_SCOPE]) and a second scope could be added back
+// here without changing it.
+export const INITIAL_TASK_BOARD_QUERY = gql`
     query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $language: String) {
         ${INITIAL_SCOPE}: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${INITIAL_SCOPE}") {
             ${TASK_BOARD_PAGE_SELECTION}
@@ -161,7 +164,7 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
     }
 `;
 
-export const ASSIGN_TASK_TO_ME_MUTATION = /* GraphQL */ `
+export const ASSIGN_TASK_TO_ME_MUTATION = gql`
     mutation AssignTaskToMe($id: String!) {
         assignTaskToMe(id: $id) {
             id
@@ -169,7 +172,7 @@ export const ASSIGN_TASK_TO_ME_MUTATION = /* GraphQL */ `
     }
 `;
 
-export const UNASSIGN_TASK_MUTATION = /* GraphQL */ `
+export const UNASSIGN_TASK_MUTATION = gql`
     mutation UnassignTask($id: String!) {
         unassignTask(id: $id) {
             id
@@ -177,7 +180,7 @@ export const UNASSIGN_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
-export const SUSPEND_TASK_MUTATION = /* GraphQL */ `
+export const SUSPEND_TASK_MUTATION = gql`
     mutation SuspendTask($id: String!) {
         suspendTask(id: $id) {
             id
@@ -185,7 +188,7 @@ export const SUSPEND_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
-export const RESUME_TASK_MUTATION = /* GraphQL */ `
+export const RESUME_TASK_MUTATION = gql`
     mutation ResumeTask($id: String!) {
         resumeTask(id: $id) {
             id
@@ -193,7 +196,7 @@ export const RESUME_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
-export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
+export const COMPLETE_TASK_MUTATION = gql`
     mutation CompleteTask($id: String!, $outcome: String!) {
         completeTask(id: $id, outcome: $outcome) {
             id
@@ -206,7 +209,7 @@ export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
 // than the same one behind a flag -- see TaskBoardMutationExtensions#reviewTask for why the two
 // have different state guards, different RBAC and different failure semantics. A started task the
 // viewer already owns keeps using completeTask; there is nothing left to claim there.
-export const REVIEW_TASK_MUTATION = /* GraphQL */ `
+export const REVIEW_TASK_MUTATION = gql`
     mutation ReviewTask($id: String!, $outcome: String!) {
         reviewTask(id: $id, outcome: $outcome) {
             id
@@ -271,7 +274,7 @@ export type TaskBoardQueryResult = {
 };
 
 // Keyed by INITIAL_SCOPE's own value (SCOPE_ALL), so the type follows the query's alias rather
-// than restating it: both entry points read result[INITIAL_SCOPE].
+// than restating it -- TasksDashboardApp reads result[INITIAL_SCOPE].
 export type InitialTaskBoardQueryResult = {
     [SCOPE_ALL]: TaskBoardConnection;
     taskBoardCurrentUserKey: string;
