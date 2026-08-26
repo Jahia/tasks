@@ -44,29 +44,22 @@
 package org.jahia.modules.tasks.rules;
 
 import org.apache.commons.lang.StringUtils;
-import org.drools.core.spi.KnowledgeHelper;
-import org.jahia.ajax.gwt.client.data.definition.GWTJahiaNodePropertyValue;
-import org.jahia.exceptions.JahiaException;
 import org.jahia.registries.ServicesRegistry;
 import org.jahia.services.content.JCRNodeWrapper;
 import org.jahia.services.content.JCRPropertyWrapper;
-import org.jahia.services.content.decorator.JCRGroupNode;
 import org.jahia.services.content.decorator.JCRUserNode;
 import org.jahia.services.content.rules.AddedNodeFact;
-import org.jahia.services.sites.JahiaSite;
-import org.jahia.services.tasks.Task;
-import org.jahia.services.tasks.TaskService;
 import org.jahia.services.usermanager.JahiaUser;
 import org.jahia.services.workflow.WorkflowService;
 import org.jahia.services.workflow.WorkflowVariable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.ItemNotFoundException;
 import javax.jcr.PropertyIterator;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 
@@ -78,8 +71,10 @@ import java.util.List;
 public class Tasks {
     private transient static Logger logger = LoggerFactory.getLogger(Tasks.class);
 
+    private static final String MY_TASKS_NODE_NAME = "my-tasks";
+    private static final String PAGECONTENT_NODE_NAME = "pagecontent";
+
     private static Tasks instance;
-    private TaskService taskService;
 
     private Tasks() {
         super();
@@ -92,61 +87,83 @@ public class Tasks {
         return instance;
     }
 
-    public void createTask(String user, String title, String description, String priority, Date dueDate, String state,
-                           KnowledgeHelper drools) throws RepositoryException {
-        Task task = new Task(title, description);
-        if (priority != null) {
-            task.setPriority(Task.Priority.valueOf(priority));
+    /**
+     * Materializes the "My tasks" dashboard tile's default content directly onto a user node.
+     * The "tasks" contentTemplate's own default pagecontent (see src/main/import/repository.xml)
+     * is never inherited onto the live /users/&lt;username&gt; node the way a jnt:page inherits its
+     * template's default area content -- the dashboard iframe just renders "No item found" instead.
+     * Idempotent: skips users that already have this content (e.g. re-running after a manual edit).
+     */
+    public void materializeDashboardTile(AddedNodeFact node) {
+        try {
+            materializeDashboardTile(node.getNode());
+        } catch (RepositoryException e) {
+            logger.error("Cannot materialize the tasks dashboard tile for new user node", e);
         }
-        task.setDueDate(dueDate);
-        if (state != null) {
-            task.setState(Task.State.valueOf(state));
-        }
-        taskService.createTask(task, user);
     }
 
-    public void createTask(AddedNodeFact user, String title, String description, String priority, Date dueDate, String state,
-                           KnowledgeHelper drools) throws RepositoryException {
-        Task task = new Task(title, description);
-        if (priority != null) {
-            task.setPriority(Task.Priority.valueOf(priority));
+    /**
+     * @return true if the tile's content was just created, false if the user node already had it
+     */
+    private boolean materializeDashboardTile(JCRNodeWrapper userNode) throws RepositoryException {
+        if (userNode.hasNode("pagecontent/my-tasks/currentUserTasks")) {
+            return false;
         }
-        task.setDueDate(dueDate);
-        if (state != null) {
-            task.setState(Task.State.valueOf(state));
+
+        JCRNodeWrapper pagecontent = userNode.hasNode(PAGECONTENT_NODE_NAME)
+                ? userNode.getNode(PAGECONTENT_NODE_NAME)
+                : userNode.addNode(PAGECONTENT_NODE_NAME, "jnt:contentList");
+        JCRNodeWrapper myTasks = pagecontent.hasNode(MY_TASKS_NODE_NAME)
+                ? pagecontent.getNode(MY_TASKS_NODE_NAME)
+                : pagecontent.addNode(MY_TASKS_NODE_NAME, "jnt:contentList");
+
+        // Mirrors the "tasks" contentTemplate's own default currentUserTasks node
+        // (src/main/import/repository.xml) -- keep the two in sync if either changes.
+        JCRNodeWrapper currentUserTasks = myTasks.addNode("currentUserTasks", "jnt:currentUserTasks");
+        currentUserTasks.addMixin("jmix:renderable");
+        currentUserTasks.setProperty("displayAssignee", true);
+        currentUserTasks.setProperty("displayCreator", true);
+        currentUserTasks.setProperty("displayState", true);
+        currentUserTasks.setProperty("filterOnAssignee", "assignedToMeOrUnassigned");
+        currentUserTasks.setProperty("filterOnStates", new String[]{"active", "started", "suspended"});
+        currentUserTasks.setProperty("sortBy", "jcr:created");
+        return true;
+    }
+
+    /**
+     * PO-trial 2026-08 (#65): copies a manual task's {@code assignee} reference -- the property
+     * Content Editor now offers a user picker for (see definitions.cnd) -- onto
+     * {@code assigneeUserKey}, which is what the task board's Owner column, its mutations and
+     * {@code TaskAuthorizationService} all read. Without it a task assigned through the standard
+     * content UI would still show as "Unassigned" on the board.
+     *
+     * <p>Called from the rule carrying the same marker in rules.drl, which fires on a change to
+     * {@code assignee} on a {@code jnt:task}. Writing assigneeUserKey here re-enters the rule
+     * engine on THAT property, which is why the value is compared first: an edit that changes
+     * nothing writes nothing. Clearing the reference clears the key with it.
+     *
+     * <p>Revert = delete this method and that rule.
+     */
+    public void mirrorAssigneeToUserKey(AddedNodeFact node) {
+        try {
+            JCRNodeWrapper task = node.getNode();
+            String assigneeUserKey = "";
+            if (task.hasProperty("assignee")) {
+                try {
+                    assigneeUserKey = task.getProperty("assignee").getNode().getPath();
+                } catch (ItemNotFoundException e) {
+                    // A weakreference whose target has been deleted resolves to nothing: treated
+                    // as "no assignee" rather than failing the edit that triggered this.
+                    logger.warn("Task {} references an assignee that no longer exists", task.getPath());
+                }
+            }
+            String current = task.hasProperty("assigneeUserKey") ? task.getPropertyAsString("assigneeUserKey") : "";
+            if (!assigneeUserKey.equals(current)) {
+                task.setProperty("assigneeUserKey", assigneeUserKey);
+            }
+        } catch (RepositoryException e) {
+            logger.error("cannot mirror the task assignee onto assigneeUserKey", e);
         }
-        taskService.createTask(task, (JCRUserNode) user.getNode());
-    }
-
-    public void createTask(String user, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        createTask(user, title, description, null, null, null, drools);
-    }
-
-    public void createTask(AddedNodeFact user, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        createTask(user, title, description, null, null, null, drools);
-    }
-
-    public void createTaskForGroupMembers(String group, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        String siteKey = null;
-        if (group.startsWith("/sites/")) {
-            siteKey = StringUtils.substringBetween(group, "/sites/", "/");
-        }
-        if (group.indexOf('/') != -1) {
-            group = StringUtils.substringAfterLast(group, "/");
-        }
-        taskService.createTaskForGroup(new Task(title, description), group, siteKey);
-    }
-
-    public void createTaskForGroupMembers(AddedNodeFact group, String title, String description, KnowledgeHelper drools)
-            throws RepositoryException {
-        taskService.createTaskForGroup(new Task(title, description), (JCRGroupNode) group.getNode());
-    }
-
-    public void setTaskService(TaskService taskService) {
-        this.taskService = taskService;
     }
 
     public void assignTask(AddedNodeFact node, String username) {

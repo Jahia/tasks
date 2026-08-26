@@ -1,0 +1,7 @@
+mutation UnassignTask($id: String!) {
+    unassignTask(id: $id) {
+        id
+        owner
+        state
+    }
+}

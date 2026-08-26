@@ -1,0 +1,9 @@
+query NodeTitle($id: String!) {
+    jcr {
+        nodeById(uuid: $id) {
+            property(name: "jcr:title") {
+                value
+            }
+        }
+    }
+}

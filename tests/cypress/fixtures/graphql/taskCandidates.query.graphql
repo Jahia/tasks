@@ -1,0 +1,13 @@
+# The RAW candidates the workflow engine wrote on the task node, as opposed to the board's own
+# resolved candidateDisplayNames -- read by the workflow fixtures to prove candidacy was really
+# registered engine-side before any visibility expectation is asserted on it.
+query TaskCandidates($id: String!) {
+    jcr(workspace: EDIT) {
+        nodeById(uuid: $id) {
+            path
+            property(name: "candidates") {
+                values
+            }
+        }
+    }
+}

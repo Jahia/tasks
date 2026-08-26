@@ -26,15 +26,19 @@ jobs:
       - uses: actions/checkout@v3
       - uses: Jahia/jahia-modules-action/static-analysis@v2
         with:
-          node_version: 12
+          node_version: 22
           auditci_level: critical
+          # tests/ is its own toolchain boundary (own package.json/tsconfig, Cypress globals
+          # the root eslint.config.js deliberately doesn't cover -- see its own ignores comment)
+          # and ships no lint script at all.
+          skip_lint_tests: true
 
   build:
     name: Build Module
     needs: update-signature
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/jahia/jahia-docker-mvn-cache:8-jdk-noble-mvn-loaded
+      image: ghcr.io/jahia/jahia-docker-mvn-cache:17-jdk-noble-mvn-loaded
       credentials:
         username: ${{ secrets.GH_PACKAGES_USERNAME }}
         password: ${{ secrets.GH_PACKAGES_TOKEN }}
@@ -44,7 +48,6 @@ jobs:
         with:
           nexus_username: ${{ secrets.NEXUS_USERNAME }}
           nexus_password: ${{ secrets.NEXUS_PASSWORD }}
-          module_id: tasks
 
   sonar-analysis:
     name: Sonar Analysis
@@ -58,3 +61,18 @@ jobs:
           github_pr_id: ${{github.event.number}}
           sonar_url: ${{ secrets.SONAR_URL }}
           sonar_token: ${{ secrets.SONAR_TOKEN }}
+
+  integration-tests-standalone:
+    name: Integration Tests (Standalone)
+    needs: build
+    secrets: inherit
+    uses: Jahia/jahia-modules-action/.github/workflows/reusable-integration-tests.yml@v2
+    with:
+      module_id: tasks
+      module_branch: ${{ github.ref }}
+      testrail_project: Tasks Module
+      jahia_image: ghcr.io/jahia/jahia-ee-dev:8-SNAPSHOT
+      should_skip_testrail: true
+      provisioning_manifest: provisioning-manifest-build.yml
+      artifact_prefix: tasks-standalone-artifacts
+      timeout_job: 45

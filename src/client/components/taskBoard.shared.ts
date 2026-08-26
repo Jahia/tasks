@@ -1,0 +1,405 @@
+/**
+ * The board's GraphQL documents and result types, plus its pure DURATION functions (dueStatus and
+ * the waiting-age trio at the bottom).
+ *
+ * Split out of TaskBoard.client.tsx rather than living beside the markup because this module pulls
+ * in nothing but @apollo/client, so the duration functions can be imported and exercised on their
+ * own -- which is what tests/cypress/e2e/task-duration.cy.ts does (#63), with no browser and no
+ * Jahia. Anything in TaskBoard.client.tsx drags Moonstone in with it.
+ *
+ * Until #69 the split had a second, harder reason: these documents were also read by the
+ * server-rendered jnt:currentUserTasks view, which was forbidden from importing anything the
+ * client bundle touched. That view is gone, and the board and its dashboard entry point are now
+ * the only readers.
+ */
+
+import {gql} from '@apollo/client';
+import type {Translate, TranslatePlural} from '../lib/i18n';
+
+// The board's own default scope: everything except finished tasks, so completed work doesn't
+// pile up in the list forever. Passed as an explicit filterState value (an existing but,
+// until now, never-actually-called server arg -- see TaskBoardQueryExtensions#taskBoard) rather
+// than baked into the server as a hidden default, so the taskBoard query itself stays a
+// complete, neutral listing endpoint -- every call site here just opts into this narrower view.
+export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
+
+// What the board's "Show finished" toggle widens filterState to. It adds BOTH terminal states,
+// not just "finished": "cancelled" is the other end a task can stop at (jnt:task's own choicelist
+// declares it, and the task detail view's Cancel button writes it -- see
+// TaskBoardMutationExtensions#ALLOWED_STATES), and it is excluded from NOT_FINISHED_STATES
+// exactly as "finished" is. With only "finished" added here, a cancelled task would be
+// unreachable from this board in either position of the toggle, which is a worse answer than a
+// toggle whose label names the state reviewers actually look for.
+export const ALL_STATES = [...NOT_FINISHED_STATES, 'finished', 'cancelled'];
+
+// The two states a task STOPS at. Derived from the two lists above rather than restated, so a
+// state added to either one can't leave this set silently wrong -- it is what the overdue signal
+// below keys on ("past its due date" only means something while the task is still open).
+export const CLOSED_STATES = ALL_STATES.filter(state => !NOT_FINISHED_STATES.includes(state));
+
+// The board's own default sort: newest created first (jahia-private#5292), which is also the
+// server's own documented default (TaskBoardQueryExtensions#DEFAULT_SORT_PROPERTY). Sent
+// explicitly all the same, so the very first render already matches what the table's sorted
+// column header shows, before any interaction re-fetches anything -- and, unlike the previous
+// 'title'/'ascending' default, this one is a raw JCR property, so the initial page is served by
+// the query-level fast path (#64) instead of a full scan.
+export type TaskSortOrder = 'ascending' | 'descending';
+
+export const DEFAULT_SORT_BY = 'jcr:created';
+// Typed rather than inferred, so this stays "one of the two directions the server accepts" and
+// callers can branch on it -- an inferred 'descending' literal would make comparing it to
+// 'ascending' a compile error instead of a runtime branch.
+export const DEFAULT_SORT_ORDER: TaskSortOrder = 'descending';
+
+// The "mine vs. my group's" split (#61). Each value narrows the caller's own visibility further,
+// server-side (see TaskBoardQueryExtensions#appendScopeFilter) rather than by filtering an
+// already-fetched page, so pagination and totalCount stay correct within the selected scope.
+export const SCOPE_ASSIGNED_TO_ME = 'assignedToMe';
+export const SCOPE_CLAIMABLE = 'claimable';
+export const SCOPE_ALL = 'all';
+
+export type TaskScope = typeof SCOPE_ASSIGNED_TO_ME | typeof SCOPE_CLAIMABLE | typeof SCOPE_ALL;
+
+// Every field a board row needs, written once and spliced into both queries below -- the initial
+// fetch and the paging/filtering one ask for identical rows, and a row field added to one of them
+// only is a row that renders differently before and after the first interaction.
+//
+// A plain template string, NOT a gql document: this is a selection SET, not a standalone
+// operation, so gql would reject it outright ("Syntax Error: Unexpected Name \"pageInfo\""). It is
+// interpolated into the two gql documents below, where graphql-tag concatenates it before parsing.
+const TASK_BOARD_PAGE_SELECTION = `
+    pageInfo {
+        hasNextPage
+        endCursor
+        totalCount
+    }
+    edges {
+        node {
+            id
+            title
+            creator
+            createdDate
+            owner
+            assigneeDisplayName
+            state
+            dueDate
+            priority
+            # The primary node type. Read for exactly one thing on this board: deciding whether a
+            # row's description is the workflow engine's summary (and therefore says which language
+            # the review was raised for) or free text somebody typed -- see resolvePreviewLanguage
+            # in ./taskPreview.shared.
+            taskType
+            possibleOutcomeDetails(language: $language) {
+                name
+                displayLabel
+            }
+            description
+            workflowSummary
+            viewerRole
+            isAssignableToMe
+            candidateDisplayNames
+            simpleWorkflowTaskData {
+                id
+                comment
+            }
+            targetNode {
+                url
+                # What the preview side panel hands jContent's own content side panel (jcontent
+                # #2700) to identify the node -- one scalar off a node the row already resolves,
+                # rather than a second round trip when the panel opens.
+                path
+                property(name: "jcr:title") {
+                    value
+                }
+            }
+        }
+    }
+`;
+
+export const TASK_BOARD_QUERY = gql`
+    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String, $language: String) {
+        taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState, scope: $scope) {
+            ${TASK_BOARD_PAGE_SELECTION}
+        }
+    }
+`;
+
+// Which scope the board opens on: "All tasks", always (#61). Every viewer sees the whole board
+// they are entitled to see first, and narrows it themselves with the scope tabs -- rather than
+// landing on a pre-filtered subset whose emptiness (or smallness) reads as "there is nothing
+// here" when there usually is. Kept a named constant rather than inlined, so the board's own
+// default scope and the initial query below can't drift apart.
+//
+// Replaces #61's pickInitialScope(), which opened on the first NON-EMPTY of assignedToMe /
+// claimable / all. That function was the only consumer of the other two scopes' pages, so
+// dropping it also drops two thirds of the initial query -- see below.
+//
+// Typed as the literal scope it is, NOT widened to TaskScope: TasksDashboardApp indexes the
+// initial result with it (result[INITIAL_SCOPE]), and that result only carries the one scope's
+// page -- widening the type here would make that lookup an "implicitly any" compile error rather
+// than the checked field access it is.
+export const INITIAL_SCOPE: typeof SCOPE_ALL = SCOPE_ALL;
+
+// The dashboard route's first page: adds the viewer fields the board needs for its action
+// display logic (see TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll),
+// and fetches page 1 of the scope the board opens on.
+//
+// ONE page, not the three aliased ones #61 fetched. Those three existed solely to decide the
+// opening scope from real rows; with that decision now fixed at INITIAL_SCOPE, the other two
+// pages were fetched and discarded on every single board load. Nothing else consumed them: the
+// scope tabs carry no counts (see SCOPE_OPTIONS in TaskBoard.client.tsx), and switching scope
+// re-fetches page 1 of the new scope anyway (the effect on `scope` in that file), so there was no
+// instant-switch cache to preserve either.
+//
+// Still an aliased field rather than a plain `taskBoard`, so the result keeps the shape
+// TasksDashboardApp indexes with (result[INITIAL_SCOPE]) and a second scope could be added back
+// here without changing it.
+export const INITIAL_TASK_BOARD_QUERY = gql`
+    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $language: String) {
+        ${INITIAL_SCOPE}: taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: "${INITIAL_SCOPE}") {
+            ${TASK_BOARD_PAGE_SELECTION}
+        }
+        taskBoardCurrentUserKey
+        taskBoardCanReviewAll
+    }
+`;
+
+export const ASSIGN_TASK_TO_ME_MUTATION = gql`
+    mutation AssignTaskToMe($id: String!) {
+        assignTaskToMe(id: $id) {
+            id
+        }
+    }
+`;
+
+export const UNASSIGN_TASK_MUTATION = gql`
+    mutation UnassignTask($id: String!) {
+        unassignTask(id: $id) {
+            id
+        }
+    }
+`;
+
+export const SUSPEND_TASK_MUTATION = gql`
+    mutation SuspendTask($id: String!) {
+        suspendTask(id: $id) {
+            id
+        }
+    }
+`;
+
+export const RESUME_TASK_MUTATION = gql`
+    mutation ResumeTask($id: String!) {
+        resumeTask(id: $id) {
+            id
+        }
+    }
+`;
+
+export const COMPLETE_TASK_MUTATION = gql`
+    mutation CompleteTask($id: String!, $outcome: String!) {
+        completeTask(id: $id, outcome: $outcome) {
+            id
+        }
+    }
+`;
+
+// The one-click fast path (#67): claim + complete in a single request, for an ACTIVE task the
+// viewer is eligible to take. Deliberately a different mutation from COMPLETE_TASK_MUTATION rather
+// than the same one behind a flag -- see TaskBoardMutationExtensions#reviewTask for why the two
+// have different state guards, different RBAC and different failure semantics. A started task the
+// viewer already owns keeps using completeTask; there is nothing left to claim there.
+export const REVIEW_TASK_MUTATION = gql`
+    mutation ReviewTask($id: String!, $outcome: String!) {
+        reviewTask(id: $id, outcome: $outcome) {
+            id
+        }
+    }
+`;
+
+// One completion decision a started task offers. displayLabel is resolved server-side, in the
+// workflow's own resource bundle (GqlTaskBoard#getPossibleOutcomeDetails) -- the client displays
+// it verbatim and never derives a label from the name itself.
+export type TaskBoardOutcome = {
+    name: string;
+    displayLabel: string;
+};
+
+export type TaskBoardNode = {
+    id: string;
+    title: string | null;
+    creator: string | null;
+    createdDate: string | null;
+    owner: string | null;
+    assigneeDisplayName: string | null;
+    state: string | null;
+    // ISO-8601 instant, as stored on the node's dueDate property; null for a task with no due
+    // date at all (which is most workflow tasks -- only jnt:task declares a default for it).
+    dueDate: string | null;
+    // "low" | "normal" | "high" -- jnt:task's own choicelist (definitions.cnd). Kept a plain
+    // string for the same reason viewerRole is: the server returns the stored value verbatim.
+    priority: string | null;
+    // "jnt:task" | "jnt:workflowTask" -- the node's primary type, as the server reports it.
+    taskType: string | null;
+    possibleOutcomeDetails: TaskBoardOutcome[];
+    description: string | null;
+    workflowSummary: string | null;
+    // "assignee" | "candidate" | "none" -- kept as a plain string rather than a union, mirroring
+    // the server's deliberately non-enum GraphQL field (see GqlTaskBoard#getViewerRole), so a role
+    // added later doesn't turn into a type error here before anything consumes it.
+    viewerRole: string;
+    // Whether the viewer is owner-or-candidate for this task, i.e. eligible to claim it. Distinct
+    // from viewerRole !== 'none' only in intent, but it is the field the one-click fast path gates
+    // on: viewerRole is deliberately independent of canReviewAll (see GqlTaskBoard#getViewerRole),
+    // so a reviewer acting on a task they are not a candidate for reads 'none' there.
+    isAssignableToMe: boolean;
+    candidateDisplayNames: string[];
+    // The jnt:simpleWorkflow child carrying the reviewer's comment, when this task has one; null
+    // for every plain task and for any other taskData node type.
+    simpleWorkflowTaskData: {id: string; comment: string | null} | null;
+    targetNode: {url: string; path: string; property: {value: string} | null} | null;
+};
+
+export type TaskBoardConnection = {
+    pageInfo: {
+        hasNextPage: boolean;
+        endCursor: string | null;
+        totalCount: number;
+    };
+    edges: Array<{node: TaskBoardNode}>;
+};
+
+export type TaskBoardQueryResult = {
+    taskBoard: TaskBoardConnection;
+};
+
+// Keyed by INITIAL_SCOPE's own value (SCOPE_ALL), so the type follows the query's alias rather
+// than restating it -- TasksDashboardApp reads result[INITIAL_SCOPE].
+export type InitialTaskBoardQueryResult = {
+    [SCOPE_ALL]: TaskBoardConnection;
+    taskBoardCurrentUserKey: string;
+    taskBoardCanReviewAll: boolean;
+};
+
+/**
+ * What a row's due date means right now:
+ * - "none": no due date at all (or an unparseable one) -- the Due cell renders empty.
+ * - "due": it has one, and nothing is wrong with it.
+ * - "overdue": the date has passed AND the task is still open.
+ *
+ * Lives here rather than in TaskBoard.client.tsx so it stays a pure, framework-free function of
+ * its three arguments -- next to the state vocabulary (CLOSED_STATES) it is defined against, and
+ * runnable on its own, unlike anything in a module that imports Moonstone. Rendering (formatting
+ * the date, choosing the chip) stays in the component; this decides only which of the three cases
+ * a row is in.
+ *
+ * "now" is an argument, not a Date.now() call inside: the whole point of this function is that its
+ * answer is a function of the instant it is asked about, so that instant has to be something a
+ * caller (or a check of this logic) can state.
+ */
+export type DueStatus = 'none' | 'due' | 'overdue';
+
+export function dueStatus(dueDate: string | null, state: string | null, now: number = Date.now()): DueStatus {
+    if (!dueDate) {
+        return 'none';
+    }
+
+    const due = new Date(dueDate).getTime();
+    if (Number.isNaN(due)) {
+        // An unparseable stored value is "no usable due date", not "overdue": the row still has to
+        // render, and flagging it red would be an assertion this function can't actually make.
+        return 'none';
+    }
+
+    // A finished or cancelled task is never overdue, however long ago its date passed: the work
+    // stopped, so the deadline stopped meaning anything. Only reachable with the board's "Show
+    // finished" toggle on, which is exactly when a screenful of red would be pure noise.
+    if (state !== null && CLOSED_STATES.includes(state)) {
+        return 'due';
+    }
+
+    return due < now ? 'overdue' : 'due';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Waiting duration
+// ---------------------------------------------------------------------------------------------
+
+// The Moonstone Chip colour vocabulary, restated here rather than imported: this file is
+// deliberately free of any Moonstone import (see the header), and waitingColor below has to name
+// the value it returns. TaskBoard.client.tsx imports this type back for its own state-chip map, so
+// there is still exactly one definition of it.
+export type ChipColor = 'default' | 'accent' | 'success' | 'warning' | 'danger' | 'reassuring' | 'light';
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const DAYS_PER_WEEK = 7;
+// Past this many whole days the duration reads in weeks instead of days, so a months-old task
+// says "9 weeks" rather than "64 days".
+export const WAITING_WEEKS_FROM_DAYS = 14;
+// Escalation thresholds. The colour is never the only carrier of this information -- the chip's
+// own text always states the duration, so the same escalation is readable without seeing colour.
+export const WAITING_WARNING_DAYS = 5;
+export const WAITING_DANGER_DAYS = 10;
+// createdDate is nullable (a task whose jcr:created can't be read), and this column has to sort
+// and render regardless: one sentinel, checked in both places, rather than a nullable number.
+export const WAITING_UNKNOWN = -1;
+
+/**
+ * Whole 24h periods elapsed since {@code createdDate}, not calendar days: "created 25 hours ago"
+ * is 1 day here even if that crosses two midnights. Deliberate -- this is an age/SLA indicator
+ * ("how long has this been sitting?"), and elapsed time is what that question means.
+ *
+ * "now" is an argument with a default, exactly as in dueStatus() above and for the same reason:
+ * the answer is a function of the instant it is asked about, so that instant has to be something
+ * a caller (or a check of this logic) can state rather than something read from the clock inside.
+ */
+export function waitingDaysSince(createdDate: string | null, now: number = Date.now()): number {
+    if (!createdDate) {
+        return WAITING_UNKNOWN;
+    }
+
+    const created = new Date(createdDate).getTime();
+    if (Number.isNaN(created)) {
+        return WAITING_UNKNOWN;
+    }
+
+    // Clamped at 0: a task whose jcr:created is slightly in the future (clock skew between the
+    // server that wrote it and the browser reading it) is "today", not a negative age.
+    return Math.max(0, Math.floor((now - created) / MS_PER_DAY));
+}
+
+// Pluralized through i18next's own count mechanism rather than a ternary, so each language applies
+// its OWN rule to the locale file's "<key>" / "<key>_plural" pair -- French, for instance, keeps
+// the singular at 0 ("0 jour"), which an English-shaped `days === 1 ? ... : ...` cannot express.
+export function waitingLabel(t: Translate, tPlural: TranslatePlural, days: number): string {
+    if (days === WAITING_UNKNOWN) {
+        return t('board.waiting.unknown', 'unknown');
+    }
+
+    if (days === 0) {
+        return t('board.waiting.today', 'today');
+    }
+
+    if (days < WAITING_WEEKS_FROM_DAYS) {
+        return tPlural('board.waiting.days', days, '{{count}} day', '{{count}} days');
+    }
+
+    const weeks = Math.floor(days / DAYS_PER_WEEK);
+    return tPlural('board.waiting.weeks', weeks, '{{count}} week', '{{count}} weeks');
+}
+
+export function waitingColor(days: number): ChipColor {
+    if (days === WAITING_UNKNOWN) {
+        return 'default';
+    }
+
+    if (days > WAITING_DANGER_DAYS) {
+        return 'danger';
+    }
+
+    if (days > WAITING_WARNING_DAYS) {
+        return 'warning';
+    }
+
+    return 'default';
+}

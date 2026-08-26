@@ -1,0 +1,336 @@
+/* A CSS module: every class below is rewritten by Vite to a hashed name and reached from the
+   component as `styles.x`, which is what the rest of the recent Jahia React UI does
+   (content-versioning, formidable-elements, page-audit). Until #69 this had to be a plain
+   side-effect stylesheet with hand-prefixed BEM names, because two bundlers with different
+   CSS-modules semantics consumed the same file; one build now owns it, so the bundler does the
+   scoping and the names can be short and local.
+
+   The hashing is also why the Cypress suite selects `data-sel-role` attributes rather than
+   classes: a hashed name is not a stable contract, an attribute the component sets on purpose is.
+
+   Uses Moonstone's own spacing tokens (not fixed px values) so this keeps matching the rest of
+   the Jahia admin UI if Moonstone's scale ever changes, instead of drifting out of sync with it. */
+.content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+    padding: var(--spacing-medium);
+
+    /* Jahia's dashboard shell has no scroll container anywhere above this component (body
+       itself is overflow:hidden) -- every adminRoute tile is expected to supply its own
+       scroll region, the same way the built-in Home tile does (HomeScreen.scss .root).
+       Without min-height:0 the flex item can't shrink below its content size, so overflow-y
+       would never actually trigger. */
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+/* The scope tabs and the "Show finished" toggle share one row: the toggle narrows the same
+   listing the tabs do, so it belongs beside them rather than in the toolbar below. */
+.scopes {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+}
+
+.showFinished {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-small);
+}
+
+.showFinished label {
+    cursor: pointer;
+}
+
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+}
+
+/* The scope tabs' tabpanel (#62). Purely an ARIA container -- it exists so each tab has something
+   to point aria-controls at -- so it is made transparent to layout: it re-creates the flex-column
+   context the table and the EmptyData block used to sit in as direct children of
+   .content. flex-basis stays `auto` (not 0) on purpose: with a basis of 0 the panel
+   would be capped at the free space and a full page of rows would overflow it into a region the
+   scroll container above can no longer reach. flex-grow is what still lets the empty state fill
+   the remaining height, as it did when EmptyData's own flexFluid faced this container directly. */
+.panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+}
+
+.search {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-small);
+}
+
+.searchInput {
+    width: 260px;
+}
+
+/* Moonstone's DataTable fixes every body row at 48px (hashed _tableRow_ class) and its cells
+   clip overflow -- but this board's Task cell (title + summary + caption lines, plus the comment
+   box once a reviewer opens one) is deliberately taller than one line. Let rows
+   grow with their content instead of clipping it; min-height keeps sparse rows on Moonstone's
+   native rhythm. Rows are flex containers in Moonstone's DataTable, so top-align the columns --
+   a centred one-line State chip floating beside a three-line Task cell reads as misaligned. */
+.content tbody tr {
+    height: auto;
+    min-height: 48px;
+    align-items: flex-start;
+}
+
+/* The Task column carries the row's main content, but an unsized DataTable column gets a fixed
+   default width rather than the remaining space -- let it (header and body alike, rows being flex
+   containers) absorb whatever the fixed-width columns leave over. Rows must never wrap: on a
+   narrow viewport a wrapped flex row scatters the State/Actions cells underneath the Task cell,
+   which reads as a broken table -- below the table's minimum usable width the board scrolls
+   horizontally instead (overflow-x on the same element that already scrolls vertically). */
+.content {
+    overflow-x: auto;
+
+    /* Both required for overflow-x to ever engage: as a flex item this element's min-width
+       defaults to its content's intrinsic width, so without these it GROWS past its parent
+       (whose overflow is visible, on a page whose body is overflow:hidden) and the table's
+       right-hand columns become unreachable instead of scrollable. */
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* moonstone-alpha's ContentLayout has the same flex-item gap one level up: its paper chain has
+   no min-width:0, so it sizes to the table's max-content width and pushes the whole dashboard
+   past the (overflow:hidden) viewport instead of letting the board's own overflow-x engage.
+   Constrained from here until the alpha component ships its own containment. :where() keeps
+   specificity at zero, and :global() is REQUIRED: these are the alpha component's own stable
+   public class names, so this file must not rewrite them the way it rewrites its own -- without
+   it the selector is hashed into something that matches nothing, and does so silently. */
+:where(:global(.moonstoneAlpha-contentLayout_paperContainer), :global(.moonstoneAlpha-contentLayout_paper)) {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* min-width is the sum of the fixed columns (Due 140 + Priority 120 + Waiting 120 + Owner 160 +
+   State 120 + Actions 80 = 740) plus the Task column's own min-width (200) minus 120px of
+   slack -- below it the board scrolls horizontally rather than letting the rows wrap. Raised from
+   760px when Due and Priority were added (#66), then LOWERED from 1020px when the Actions column
+   shrank from 280px to the 80px kebab: every fixed column resized here has to be carried into
+   this number too, or the fixed columns either eat the flexible Task column or leave it a gap. */
+.content table {
+    width: 100%;
+    min-width: 820px;
+}
+
+.content thead tr,
+.content tbody tr {
+    flex-wrap: nowrap;
+}
+
+.content thead th:first-child,
+.content tbody td:first-child {
+    /* Basis 0, not auto: with auto the basis is the cell's unwrapped text width, which inflates
+       the whole row to the longest summary line instead of letting the text wrap in place. */
+    flex: 1 1 0;
+    min-width: 200px;
+}
+
+.content tbody td {
+    height: auto;
+    padding-top: var(--spacing-small);
+    padding-bottom: var(--spacing-small);
+}
+
+/* The Task column's cell: title line, then the workflow summary and the created-by/candidates
+   captions underneath it. A table cell is vertically centred by default, which reads badly for a
+   three-line cell sitting next to one-line ones, hence the explicit column layout. */
+.taskCell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.taskTitle {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--spacing-small);
+}
+
+/* The Due column's cell: date, then the "Overdue" chip underneath it. Stacked rather than inline
+   because the column is 140px and a chip beside a date would overflow it; align-items keeps the
+   chip from stretching to the full cell width. */
+.dueCell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+/* The linked target page's own title, shown beside the task title -- distinct from the rest of
+   the plain cell text, since it is the clickable part. */
+.targetLink {
+    color: var(--color-accent_dark120, var(--color-accent));
+    text-decoration: none;
+}
+
+.targetLink:hover {
+    text-decoration: underline;
+}
+
+.meta,
+.summary {
+    margin: 0;
+}
+
+/* The row's 3-dot action menu, following jcontent's content table: one kebab per row, right-aligned
+   in its own narrow cell and revealed on row hover (ContentTable.scss does
+   `.tableRow:hover .cellActions {visibility: inherit}` over a `visibility: hidden` cell).
+
+   opacity rather than jcontent's visibility, deliberately: a visibility:hidden button is removed
+   from the tab order entirely, so the kebab could never be reached from the keyboard -- hover
+   would be the ONLY way to it. At opacity 0 the button stays focusable and the :focus-within rule
+   below reveals it the moment it takes focus, so tabbing across the board shows each row's menu
+   button as it is reached. The --open modifier does the same while the menu itself is up, which is
+   what keeps the button (and therefore its anchored menu) on screen after the pointer has left the
+   row to travel down the menu. */
+.rowActions {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+    opacity: 0;
+    transition: opacity 120ms ease-in-out;
+}
+
+.content tbody tr:hover .rowActions,
+.content tbody tr:focus-within .rowActions,
+.rowActionsOpen {
+    opacity: 1;
+}
+
+/* The optional decision comment, opened from the row's action menu. It is rendered in the TASK
+   cell, not beside the menu that opens it: the Actions column is 80px now and could not hold a
+   text box. Full width of that (flexible) column, with air above it so it doesn't crowd the
+   created-by caption it follows. */
+.comment {
+    width: 100%;
+    margin-top: var(--spacing-small);
+}
+
+/* The "Preview" side panel. Pinned to the viewport's right edge rather than laid out beside the
+   table the way jcontent's is: this board is one admin-dashboard tile inside the app shell's own
+   layout, with no region of its own to split into two columns.
+   z-index sits BELOW Moonstone's Menu (9000) and its click-away overlay (8500), so a row's action
+   menu still opens on top of an already-open panel instead of behind it.
+   Paper supplies the surface (background, elevation) and expects to be a block in a page flow,
+   hence the margin/radius reset here. */
+.preview {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 8000;
+
+    display: flex;
+    flex-direction: column;
+    width: min(720px, 60vw);
+    min-width: 320px;
+    height: 100%;
+    overflow: hidden;
+
+    margin-top: 0;
+    border-radius: 0;
+
+    animation: previewIn 160ms ease-out;
+}
+
+@keyframes previewIn {
+    from {
+        transform: translateX(100%);
+    }
+
+    to {
+        transform: translateX(0);
+    }
+}
+
+/* Both the panel's entrance and the hover fade above are decoration -- the panel is fully usable
+   without either, so neither is imposed on a viewer who has asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+    .preview {
+        animation: none;
+    }
+
+    .rowActions {
+        transition: none;
+    }
+}
+
+.previewHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--spacing-medium);
+    padding: var(--spacing-medium);
+    border-bottom: 1px solid var(--color-gray_light);
+}
+
+/* min-width:0 so a long page title wraps (or is squeezed) instead of pushing the close button off
+   the panel -- a flex item's default min-width is its content's intrinsic width. */
+.previewTitles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+/* Everything below the header: whatever the panel manages to show for its target. Either jContent's
+   own content side panel, mounted into the host below, or -- where jContent cannot supply one --
+   the plain preview frame. */
+.previewBody {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* The box jContent's panel is mounted into. It fills 100% of its parent by contract (jcontent
+   #2700), so the parent is what has to have a size -- hence flex + min-height:0 rather than a
+   height of its own. overflow is hidden here because that panel scrolls its own body: a second
+   scrollbar out here would scroll the tab strip off the top. */
+.previewHost {
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.previewLoader {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-medium);
+}
+
+/* The standalone fallback: a caption stating what is missing, above a full-bleed frame. */
+.previewCaption {
+    margin: 0;
+    padding: var(--spacing-medium);
+    border-bottom: 1px solid var(--color-gray_light);
+}
+
+/* flex + min-height:0 so the frame takes the panel's whole remaining height rather than the
+   150px an <iframe> is intrinsically sized at. */
+.previewFrame {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    border: 0;
+}

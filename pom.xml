@@ -49,13 +49,13 @@
     <parent>
         <groupId>org.jahia.modules</groupId>
         <artifactId>jahia-modules</artifactId>
-        <version>8.0.0.0</version>
+        <version>8.2.1.0</version>
     </parent>
     <artifactId>tasks</artifactId>
-	<version>8.4.0-SNAPSHOT</version>
+    <version>9.0.0-SNAPSHOT</version>
     <packaging>bundle</packaging>
     <name>Jahia Tasks</name>
-    <description>Jahia template module for leveraging simple user and shared task management.</description>
+    <description>Jahia template module for leveraging simple user and shared task management, with a React/Moonstone task board in the administration dashboard.</description>
     <scm>
         <connection>scm:git:git@github.com:Jahia/tasks.git</connection>
         <developerConnection>scm:git:git@github.com:Jahia/tasks.git</developerConnection>
@@ -64,12 +64,22 @@
     </scm>
 
     <properties>
-        <jahia-depends>default,userDashboard</jahia-depends>
-        <export-package>org.jahia.modules.tasks.rules</export-package>
+        <jahia-depends>default,graphql-dxm-provider</jahia-depends>
+        <export-package>org.jahia.modules.tasks.rules,org.jahia.modules.tasks.graphql</export-package>
         <jahia-module-type>system</jahia-module-type>
-        <jahia-deploy-on-site>system</jahia-deploy-on-site>
+        <!-- PO-trial 2026-08 (#65): was "system" (i.e. /sites/systemsite only), which is what put
+             the "My tasks" dashboard tile on user pages and nothing else. It is ALSO what kept
+             jnt:tasks/jnt:task out of jContent's create menu on every real site: core builds that
+             menu from the node types of the modules INSTALLED ON THE SITE plus their dependencies
+             (org.jahia.utils.NodeTypesUtils#getContentTypesAsTree, which iterates
+             NodeTypeRegistry#getNodeTypes(<module id>) over site.getInstalledModules()), so a
+             system module absent from a site's j:installedModules contributes none of its types
+             there. Widened to "all" so Jahia's own auto-install
+             (ModuleInstallationHelper#autoInstallModulesToSites) adds this module to every site
+             on module start. Revert = put "system" back; see the commit body. -->
+        <jahia-deploy-on-site>all</jahia-deploy-on-site>
         <require-capability>osgi.extender;filter:="(osgi.extender=org.jahia.bundles.blueprint.extender.config)"</require-capability>
-        <jahia-module-signature>MC0CFQCSiYvnmU9n/raHdxUGTyMk9DdUZwIUDgiRGJ/tFKWU3L2GpeqzbI1gLfk=</jahia-module-signature>
+        <jahia-module-signature>MC0CFQCBIuef+YTEVKKxucrOer8JO5czXwIUZB14BWQdr8jkrOByO+hzKVCJJQU=</jahia-module-signature>
     </properties>
 
     <repositories>
@@ -87,8 +97,185 @@
         </repository>
     </repositories>
 
+    <dependencies>
+        <dependency>
+            <groupId>org.jahia.modules</groupId>
+            <artifactId>graphql-dxm-provider</artifactId>
+            <version>3.5.1</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- graphql-dxm-provider declares this itself as "provided", so it does not
+             propagate transitively. Must be declared here too (confirmed by a failed
+             local compile without it). Version picked independently; not verified to be
+             the exact one graphql-dxm-provider:3.5.1 was built against. -->
+        <dependency>
+            <groupId>io.github.graphql-java</groupId>
+            <artifactId>graphql-java-annotations</artifactId>
+            <version>21.5</version>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <plugins>
+            <plugin>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.2.0</version>
+                <configuration>
+                    <!--
+                        The same directory 'yarn clean' removes (see package.json). The build
+                        output lives outside target/, in src/main/resources/javascript/apps/, and
+                        the plugin's own default only reaches target/, so `mvn clean` would
+                        otherwise leave it entirely alone.
+                        It earns its keep: the build writes content-hashed chunk names, so every
+                        build that changes a byte of the entry produces a new set of filenames, and
+                        Include-Resource folds whatever sits in that directory into the jar whole.
+                        Under the old webpack build (removed in #61) nothing deleted the superseded
+                        ones and a `mvn clean install` shipped 18 dead chunks alongside the live
+                        ones (observed 2026-08-16), each a full copy of the board, so a string
+                        search over the jar could only ever return the union of every build ever run
+                        in that checkout. Vite now empties the directory itself (build.emptyOutDir
+                        in vite.config.mjs), which covers the plain `yarn build` case too; this
+                        fileset stays as the guarantee that a `mvn clean` really does leave a bare
+                        tree, independent of what the JS toolchain of the day happens to do.
+                        (A second fileset for dist/ went with the server-rendered build in #69.)
+                    -->
+                    <filesets>
+                        <fileset>
+                            <directory>${project.basedir}/src/main/resources/javascript/apps/</directory>
+                        </fileset>
+                    </filesets>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>1.15.1</version>
+                <configuration>
+                    <!-- v22.10.0 is too old for eslint-visitor-keys (a transitive
+                         dependency of typescript-eslint), which requires
+                         ^20.19.0 || ^22.13.0 || >=24 -->
+                    <nodeVersion>v22.23.1</nodeVersion>
+                    <yarnVersion>v1.22.22</yarnVersion>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install node and yarn - tasks</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>install-node-and-yarn</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>yarn install - tasks</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>yarn lint - tasks</id>
+                        <phase>process-sources</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>lint</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- Bound to prepare-package (not package) so the Vite build has
+                             written src/main/resources/javascript/apps/ before
+                             maven-bundle-plugin's package-phase "bundle" goal folds it into the
+                             jar via {maven-resources}. -->
+                        <id>yarn build - tasks</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>yarn</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <extensions>true</extensions>
+                <configuration>
+                    <instructions>
+                        <!-- Scan for @Component (OSGi Declarative Services) and emit OSGI-INF
+                             descriptors. Without this, @Component classes compile but never
+                             register (see jahia-java-osgi-declarative-services). -->
+                        <_dsannotations>*</_dsannotations>
+                        <!-- bnd's default policy imports these two at [21.5,22) because we
+                             compile against graphql-java-annotations 21.5, but the real
+                             graphql-dxm-provider bundle running in Jahia was built against,
+                             and itself imports at, [21.1,22); confirmed by inspecting its own
+                             MANIFEST.MF. Our narrower default range fails to resolve against
+                             Jahia's actual (older) exported version. Widened to match what is
+                             really running rather than marking the import optional, since
+                             these annotation classes are required at class-load time for our
+                             @GraphQLField-annotated methods; making them optional would trade
+                             this clean install-time failure for a NoClassDefFoundError at
+                             runtime instead. -->
+                        <!-- org.jahia.defaults.config.spring is only referenced by Jahia's own
+                             module Activator (which loads META-INF/spring/*.xml against this
+                             base classpath: resource), never by our own bytecode. bnd's "*"
+                             wildcard only imports packages it can see referenced from class or
+                             resource content, so this needs to be explicit, or the module's
+                             Spring context (the Drools "tasks" global bean) fails to resolve it
+                             at bundle start. -->
+                        <!-- org.jahia.utils.i18n (Messages, JahiaLocaleContextHolder), used by
+                             GqlTaskBoard#getTitle() to resolve the "##resourceBundle(...)##"
+                             macro, IS referenced from our own bytecode, but bnd's "*" wildcard
+                             still didn't pick it up (confirmed missing from the built MANIFEST.MF's
+                             Import-Package). Without it, the classes fail to load when
+                             graphql-dxm-provider reflects over GqlTaskBoard to build the schema,
+                             and it silently drops the whole taskBoard field rather than erroring;
+                             the exact same failure mode as the two imports above, just discovered
+                             the hard way (a live "field 'taskBoard' is not defined" instead of an
+                             install-time or class-load error). -->
+                        <!-- The three org.jahia.taglibs packages jnt_task/ics/task.jsp needs through
+                             the "http://www.jahia.org/tags/jcr" taglib: .jcr.node holds the tag
+                             handler it uses (JCRNodeTag) and the EL functions it calls
+                             (JCRTagUtils), and .jcr / (root) hold that handler's superclasses
+                             (AbstractJCRTag, AbstractJahiaTag), which the JSP compiler has to
+                             resolve as well. A module's JSPs are compiled, and their tag handlers
+                             loaded, through the BUNDLE's classloader (see JahiaJspServletWrapper),
+                             and bnd's "*" wildcard never looks inside a .jsp, so without these the
+                             .ics view fails at render time on "Unable to load tag handler class"
+                             (then, with only the leaf package, on its unresolvable supertype),
+                             which is exactly what it did before #66 wired that view into the
+                             board. Imported without a version range on purpose: the exporting
+                             bundle (org.jahia.server.jahia-taglib) versions these with the Jahia
+                             release it ships in, so a range here would pin the module to one. -->
+                        <Import-Package>
+                            graphql.annotations.annotationTypes;version="[21.1,22)",
+                            graphql.annotations.connection;version="[21.1,22)",
+                            org.jahia.defaults.config.spring,
+                            org.jahia.taglibs,
+                            org.jahia.taglibs.jcr,
+                            org.jahia.taglibs.jcr.node,
+                            org.jahia.utils.i18n,
+                            *
+                        </Import-Package>
+                        <!-- package.json travels into the jar root because the app shell reads
+                             its "jahia.remotes" entry to find the federation remote. The remote's
+                             own bundle needs nothing here: Vite writes it under
+                             src/main/resources/javascript/apps, which {maven-resources} already
+                             folds in. (Until #69 this also carried "dist=dist", the server bundle
+                             and hydration assets javascript-modules-engine discovered; that
+                             server-rendered path is gone and the module no longer involves the
+                             engine at all.) -->
+                        <Include-Resource>
+                            {maven-resources},
+                            package.json=package.json
+                        </Include-Resource>
+                    </instructions>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.cyclonedx</groupId>
                 <artifactId>cyclonedx-maven-plugin</artifactId>

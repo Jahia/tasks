@@ -1,0 +1,138 @@
+{
+  "jnt_task": {
+    "myTasks": "Meine Aufgaben"
+  },
+  "common": {
+    "unknown": "Unbekannt",
+    "unassigned": "Nicht zugewiesen",
+    "untitledTask": "Aufgabe ohne Titel",
+    "noActions": "Keine Aktionen verfügbar",
+    "error": {
+      "title": "Es ist ein Fehler aufgetreten",
+      "load": "Die Aufgaben konnten nicht geladen werden.",
+      "action": "Diese Aktion konnte nicht ausgeführt werden."
+    },
+    "priority": {
+      "low": "Niedrig",
+      "normal": "Normal",
+      "high": "Hoch"
+    },
+    "state": {
+      "active": "Aktiv",
+      "started": "Gestartet",
+      "suspended": "Ausgesetzt",
+      "finished": "Abgeschlossen",
+      "cancelled": "Abgebrochen"
+    },
+    "actions": {
+      "assignToMe": "Mir zuweisen",
+      "unassign": "Zuweisung aufheben",
+      "start": "Starten",
+      "suspend": "Aussetzen",
+      "resume": "Fortsetzen",
+      "preview": "Vorschau",
+      "complete": "Abschließen",
+      "continue": "Fortfahren",
+      "cancel": "Abbrechen",
+      "save": "Speichern",
+      "submit": "Absenden"
+    }
+  },
+  "board": {
+    "title": "Aufgaben",
+    "taskCount": "{{count}} Aufgabe",
+    "taskCount_plural": "{{count}} Aufgaben",
+    "columns": {
+      "task": "Aufgabe",
+      "due": "Fällig",
+      "priority": "Priorität",
+      "waiting": "Wartezeit",
+      "owner": "Zugewiesen an",
+      "state": "Status",
+      "actions": "Aktionen"
+    },
+    "scopes": {
+      "label": "Aufgabenbereich",
+      "assignedToMe": "Mir zugewiesen",
+      "claimable": "Für meine Gruppe(n) verfügbar",
+      "all": "Alle Aufgaben"
+    },
+    "showFinished": "Abgeschlossene anzeigen",
+    "search": {
+      "label": "Suche:",
+      "placeholder": "Aufgaben suchen..."
+    },
+    "empty": {
+      "assignedToMe": "Ihnen ist keine Aufgabe zugewiesen.",
+      "claimable": "Derzeit ist keine Aufgabe für Ihre Gruppe(n) verfügbar.",
+      "all": "Keine Aufgaben vorhanden."
+    },
+    "waiting": {
+      "today": "heute",
+      "unknown": "unbekannt",
+      "days": "{{count}} Tag",
+      "days_plural": "{{count}} Tage",
+      "weeks": "{{count}} Woche",
+      "weeks_plural": "{{count}} Wochen"
+    },
+    "due": {
+      "overdue": "Überfällig"
+    },
+    "actions": {
+      "addComment": "Kommentar hinzufügen",
+      "oneClickHint": "Weist Ihnen diese Aufgabe zu und erfasst Ihre Entscheidung in einem Schritt",
+      "showMenu": "Aufgabenaktionen anzeigen",
+      "previewInNewTab": "Vorschau in einem neuen Tab"
+    },
+    "comment": {
+      "placeholder": "Kommentar (optional)"
+    },
+    "preview": {
+      "label": "Inhaltsvorschau",
+      "close": "Vorschau schließen",
+      "task": "Aufgabe: {{title}}",
+      "standalone": "Hier ist nur die Seitenvorschau verfügbar: Details, Verwendungen und Verlauf stammen aus jContent, das auf diesem Server nicht installiert ist."
+    },
+    "meta": {
+      "createdBy": "Erstellt von: {{creator}}, am {{date}}",
+      "availableTo": "Verfügbar für: {{names}}"
+    }
+  },
+  "detail": {
+    "fields": {
+      "description": "Beschreibung",
+      "priority": "Priorität",
+      "assignee": "Zugewiesen an",
+      "state": "Status"
+    },
+    "error": {
+      "update": "Diese Aufgabe konnte nicht aktualisiert werden."
+    }
+  },
+  "list": {
+    "completed": "Abgeschlossen",
+    "actions": {
+      "markCompleted": "Abgeschlossen",
+      "refuse": "Ablehnen",
+      "showMenu": "Aufgabenaktionen anzeigen",
+      "hideMenu": "Aufgabenaktionen ausblenden"
+    }
+  },
+  "create": {
+    "fields": {
+      "title": "Titel",
+      "description": "Beschreibung",
+      "assignee": "Zugewiesen an",
+      "dueDate": "Fälligkeitsdatum"
+    },
+    "error": {
+      "create": "Diese Aufgabe konnte nicht erstellt werden."
+    }
+  },
+  "taskData": {
+    "commentLabel": "Kommentar zur Workflow-Aufgabe",
+    "error": {
+      "save": "Dieser Titel konnte nicht gespeichert werden."
+    }
+  }
+}

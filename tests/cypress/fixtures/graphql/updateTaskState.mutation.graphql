@@ -1,0 +1,6 @@
+mutation UpdateTaskState($id: String!, $state: String!) {
+    updateTaskState(id: $id, state: $state) {
+        id
+        state
+    }
+}

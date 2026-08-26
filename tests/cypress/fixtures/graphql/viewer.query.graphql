@@ -1,0 +1,7 @@
+# The two viewer-level fields the board's initial query carries alongside its first page
+# (INITIAL_TASK_BOARD_QUERY in taskBoard.shared.ts), which decide which row actions the client
+# offers at all.
+query Viewer {
+    taskBoardCurrentUserKey
+    taskBoardCanReviewAll
+}

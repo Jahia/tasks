@@ -1,0 +1,138 @@
+{
+  "jnt_task": {
+    "myTasks": "Mes tâches"
+  },
+  "common": {
+    "unknown": "Inconnu",
+    "unassigned": "Non attribuée",
+    "untitledTask": "Tâche sans titre",
+    "noActions": "Aucune action disponible",
+    "error": {
+      "title": "Une erreur est survenue",
+      "load": "Impossible de charger les tâches.",
+      "action": "Impossible d'effectuer cette action."
+    },
+    "priority": {
+      "low": "Basse",
+      "normal": "Normale",
+      "high": "Haute"
+    },
+    "state": {
+      "active": "Active",
+      "started": "Démarrée",
+      "suspended": "Suspendue",
+      "finished": "Terminée",
+      "cancelled": "Annulée"
+    },
+    "actions": {
+      "assignToMe": "M'attribuer",
+      "unassign": "Retirer l'attribution",
+      "start": "Démarrer",
+      "suspend": "Suspendre",
+      "resume": "Reprendre",
+      "preview": "Prévisualiser",
+      "complete": "Terminer",
+      "continue": "Continuer",
+      "cancel": "Annuler",
+      "save": "Enregistrer",
+      "submit": "Valider"
+    }
+  },
+  "board": {
+    "title": "Tâches",
+    "taskCount": "{{count}} tâche",
+    "taskCount_plural": "{{count}} tâches",
+    "columns": {
+      "task": "Tâche",
+      "due": "Échéance",
+      "priority": "Priorité",
+      "waiting": "En attente",
+      "owner": "Attributaire",
+      "state": "État",
+      "actions": "Actions"
+    },
+    "scopes": {
+      "label": "Périmètre des tâches",
+      "assignedToMe": "Qui me sont attribuées",
+      "claimable": "Disponibles pour mon (mes) groupe(s)",
+      "all": "Toutes les tâches"
+    },
+    "showFinished": "Afficher les tâches terminées",
+    "search": {
+      "label": "Rechercher :",
+      "placeholder": "Rechercher des tâches..."
+    },
+    "empty": {
+      "assignedToMe": "Aucune tâche ne vous est attribuée.",
+      "claimable": "Aucune tâche n'est actuellement disponible pour votre (vos) groupe(s).",
+      "all": "Aucune tâche à afficher."
+    },
+    "waiting": {
+      "today": "aujourd'hui",
+      "unknown": "inconnu",
+      "days": "{{count}} jour",
+      "days_plural": "{{count}} jours",
+      "weeks": "{{count}} semaine",
+      "weeks_plural": "{{count}} semaines"
+    },
+    "due": {
+      "overdue": "En retard"
+    },
+    "actions": {
+      "addComment": "Ajouter un commentaire",
+      "oneClickHint": "Vous attribue cette tâche et enregistre votre décision en une seule étape",
+      "showMenu": "Afficher les actions de la tâche",
+      "previewInNewTab": "Prévisualiser dans un nouvel onglet"
+    },
+    "comment": {
+      "placeholder": "Commentaire (facultatif)"
+    },
+    "preview": {
+      "label": "Prévisualisation du contenu",
+      "close": "Fermer la prévisualisation",
+      "task": "Tâche : {{title}}",
+      "standalone": "Seul l'aperçu de la page est disponible ici : les détails, les utilisations et l'historique proviennent de jContent, qui n'est pas installé sur ce serveur."
+    },
+    "meta": {
+      "createdBy": "Créée par : {{creator}}, le {{date}}",
+      "availableTo": "Disponible pour : {{names}}"
+    }
+  },
+  "detail": {
+    "fields": {
+      "description": "Description",
+      "priority": "Priorité",
+      "assignee": "Attributaire",
+      "state": "État"
+    },
+    "error": {
+      "update": "Impossible de mettre à jour cette tâche."
+    }
+  },
+  "list": {
+    "completed": "Terminée",
+    "actions": {
+      "markCompleted": "Terminée",
+      "refuse": "Refuser",
+      "showMenu": "Afficher les actions de la tâche",
+      "hideMenu": "Masquer les actions de la tâche"
+    }
+  },
+  "create": {
+    "fields": {
+      "title": "Titre",
+      "description": "Description",
+      "assignee": "Attributaire",
+      "dueDate": "Échéance"
+    },
+    "error": {
+      "create": "Impossible de créer cette tâche."
+    }
+  },
+  "taskData": {
+    "commentLabel": "Commentaire de la tâche de workflow",
+    "error": {
+      "save": "Impossible d'enregistrer ce titre."
+    }
+  }
+}

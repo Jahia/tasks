@@ -1,0 +1,12 @@
+# Whether the content under review actually got published -- the engine-side evidence that a
+# completion this module recorded on the task node was accepted by the workflow, and not just
+# written into the JCR.
+query PublicationStatus($path: String!) {
+    jcr(workspace: EDIT) {
+        nodeByPath(path: $path) {
+            aggregatedPublicationInfo(language: "en") {
+                publicationStatus
+            }
+        }
+    }
+}
