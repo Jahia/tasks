@@ -1,29 +1,19 @@
 /**
- * i18n for this module's client islands, against the app shell's own i18next instance.
+ * i18n for this module's board, against the app shell's own i18next instance.
  *
- * <h3>Why a 40-line bridge instead of react-i18next</h3>
- * Every component in src/client is bundled TWICE, by the module's two Vite builds, into two very
- * different runtimes:
- *
- * <ul>
- *   <li><b>The module-federation remote</b> (vite.federation.config.mjs) -> the admin dashboard
- *       route (TasksDashboardApp), which runs inside the app shell. There, i18next is initialized
- *       and global, and this module's 'tasks' namespace has already been requested (see
- *       src/javascript/init.tsx). (Built by webpack until #61; the runtime it lands in, and
- *       therefore everything below, is unchanged by that migration.)</li>
- *   <li><b>The SSR/islands build</b> (vite.config.mjs, @jahia/vite-plugin) -> the SSR-hydrated
- *       islands (jnt:currentUserTasks, the task detail view, the create-task form...), which
- *       hydrate on an ordinary rendered page. There is no app shell there, no i18next, and nothing
- *       to initialize one from.</li>
- * </ul>
- *
- * react-i18next's own no-instance fallback is not usable for the second case: in the version the
+ * <h3>Why a bridge instead of react-i18next</h3>
+ * react-i18next's own no-instance fallback is unusable as a degradation path: in the version the
  * shell ships (11.x, confirmed in app-shell 3.3.0's federation share scope alongside i18next
  * 19.9.2), `useTranslation()` without an instance returns a `t` that echoes the KEY back --
- * `t('board.title', 'Tasks')` renders the literal "board.title". A board that reads
- * "board.columns.due" on every content page is a worse outcome than an English one, so the
- * fallback is written here instead, where it can return the default value (interpolated) exactly
- * as i18next would have.
+ * `t('board.title', 'Tasks')` renders the literal "board.title". A board reading
+ * "board.columns.due" is a worse outcome than an English one, so the fallback is written here
+ * instead, where it can return the default value (interpolated) exactly as i18next would have.
+ *
+ * The board runs inside the app shell, where i18next is initialized and global and this module's
+ * 'tasks' namespace has already been requested (see src/javascript/init.tsx), so the fallback is
+ * not the expected path -- it is what keeps the board readable in an embedding that boots this
+ * remote some other way. (Until #69 it was the ONLY path for the server-rendered content views,
+ * which hydrated on ordinary pages with no shell; those views are gone.)
  *
  * <h3>How the shell's instance is reached</h3>
  * `window.jahia` is the app shell's own entry module (appshell.js: `window.jahia = e`), and its
@@ -37,11 +27,21 @@
  * (`/modules/tasks/javascript/locales/<lang>.json`), which is why it must stay this module's own
  * name -- see the longer note in init.tsx.
  *
- * <h3>Known limitation</h3>
- * On the SSR-island path the board renders the English defaults below regardless of the page's
- * language: nothing on a content page initializes i18next, and fetching + parsing the locale JSON
- * per island is out of scope for #62 (the issue asks for graceful English degradation there).
- * Dates on that path DO follow the page locale, which the server passes down explicitly.
+ * <h3>The namespace-versus-instance trap</h3>
+ * `window.jahia.i18n` is NOT reliably a live i18next instance. On a current shell it is the
+ * i18next MODULE NAMESPACE: it carries `t`, `init`, `use`, `createInstance`, `loadNamespaces` and
+ * `changeLanguage`, but none of the EventEmitter/store API -- no `on`, `off`, `store`, `options`,
+ * `language` or `isInitialized`. The initialized instance sits one level down, at
+ * `window.jahia.i18n.default`. The cause is upstream: Jahia's shared i18next module carries no
+ * `__esModule` marker, so the federation glue that unwraps a default export (`o.__esModule ?
+ * o.default : o`) leaves consumers holding the namespace.
+ *
+ * Duck-typing on `t` alone therefore finds an object that translates but never emits an event,
+ * which silently disables the subscription in useTasksTranslation below AND leaves `language`
+ * undefined, so dates stop following the shell's language. {@link appShellI18n} unwraps to the
+ * real instance. The same trap took kfind's search modal down outright -- react-i18next called
+ * `i18n.on(...)` on the namespace and threw mid-render -- so treat any future "read i18n off the
+ * shell" code as needing the same unwrap.
  */
 
 import {useEffect, useMemo, useState} from 'react';
@@ -68,7 +68,7 @@ type ShellGlobals = {
 export type TranslateOptions = Record<string, string | number>;
 
 /**
- * Translate `key`, falling back to `defaultValue` when i18next is absent (SSR islands) or the key
+ * Translate `key`, falling back to `defaultValue` when i18next is absent (no app shell) or the key
  * is missing from the loaded bundle. `defaultValue` is always the English text, so it doubles as
  * the in-source documentation of what the key means -- there is no separate English-only path.
  */
@@ -94,13 +94,29 @@ function shell(): ShellGlobals {
 }
 
 /**
- * The app shell's i18next instance, or undefined outside the shell. Duck-typed on `t` rather than
- * on the global merely existing: `window.jahia` is also set (to a different shape) by parts of the
- * legacy GWT UI, and an object without `t` must degrade to the defaults rather than throw.
+ * The app shell's i18next instance, or undefined outside the shell.
+ *
+ * Duck-typed on `t` rather than on the global merely existing: `window.jahia` is also set (to a
+ * different shape) by parts of the legacy GWT UI, and an object without `t` must degrade to the
+ * defaults rather than throw.
+ *
+ * Then unwrapped to `.default` when what we found is the module namespace rather than the live
+ * instance -- see the header. `on` is the probe because it is exactly what the namespace lacks and
+ * what this module needs. A namespace whose `.default` is unusable still returns the namespace:
+ * translating without live updates is what this did before the unwrap existed, and is strictly
+ * better than degrading to English.
  */
 function appShellI18n(): I18nextInstance | undefined {
-    const candidate = shell().jahia?.i18n as I18nextInstance | undefined;
-    return typeof candidate?.t === 'function' ? candidate : undefined;
+    const candidate = shell().jahia?.i18n as (I18nextInstance & {default?: I18nextInstance}) | undefined;
+    if (typeof candidate?.t !== 'function') {
+        return undefined;
+    }
+
+    if (typeof candidate.on === 'function') {
+        return candidate;
+    }
+
+    return typeof candidate.default?.t === 'function' ? candidate.default : candidate;
 }
 
 // i18next's own interpolation syntax, so a default value and its locale-file counterpart are the
@@ -122,8 +138,7 @@ function interpolate(template: string, options?: TranslateOptions): string {
  * Which locale Intl should format dates in, most authoritative first:
  * <ol>
  *   <li>the shell's i18next language -- the admin UI language the viewer actually chose;</li>
- *   <li>`preferred`, which the SSR views pass down from {@code RenderContext#getUILocale()} (the
- *       islands' only source, since they have no shell);</li>
+ *   <li>`preferred`, whatever the board's renderer passed down;</li>
  *   <li>`contextJsParameters.uilang`, the page-level global, for an embedding that has neither;</li>
  *   <li>'en'.</li>
  * </ol>
@@ -134,8 +149,8 @@ function resolveLocale(i18n: I18nextInstance | undefined, preferred?: string): s
 
 /**
  * @param preferredLocale date-formatting locale to use when the app shell isn't there to supply
- * one (the SSR islands pass the server-rendered page's UI language). Has no effect on `t`: without
- * a shell there is no loaded bundle to translate against either way.
+ * one. Has no effect on `t`: without a shell there is no loaded bundle to translate against
+ * either way.
  */
 export function useTasksTranslation(preferredLocale?: string): Translation {
     const i18n = appShellI18n();

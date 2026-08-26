@@ -12,13 +12,14 @@ export default tseslint.config(
     // config doesn't declare) -- a separate toolchain boundary, same reasoning as
     // src/main/**, not something this build's lint step should reach into.
     // (The 'webpack.*.cjs' ignore that used to sit here went away with the webpack
-    // build itself, #61: the two Vite configs that replaced it are plain ESM and
-    // lint clean like the rest of the root-level sources.)
+    // build itself, #61: the Vite config that replaced it is plain ESM and lints
+    // clean like the rest of the root-level sources. 'dist/**' went the same way in
+    // #69, with the server-rendered build that produced it.)
     // .__* is @module-federation/vite's scratch tree (.__mf__temp/ today): generated
     // JS the federation build writes into the project root mid-build, gitignored, and
     // not written to this project's rules -- it fails no-unused-vars and
     // no-constant-condition. Linting it only ever breaks `mvn install` after a build.
-    {ignores: ['.__*/**', 'dist/**', 'node/**', 'src/main/**', 'target/**', 'tests/**']},
+    {ignores: ['.__*/**', 'node/**', 'src/main/**', 'target/**', 'tests/**']},
     js.configs.recommended,
     tseslint.configs.recommended,
     {

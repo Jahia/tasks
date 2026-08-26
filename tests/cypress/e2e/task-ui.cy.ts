@@ -9,9 +9,10 @@ import {addTask, startPublicationReview} from '../support/taskFixtures';
 // What it asserts is the screen as it is NOW: a Moonstone DataTable (not the card list this spec
 // used to describe), whose per-row actions live behind a hover/focus-revealed kebab menu, above
 // scope tabs and a "Show finished" toggle, with a preview side panel showing jContent's own content
-// side panel (#61, jcontent#2700). Every selector below is either a real class this module owns
-// (task-board__*) or a role/label the component sets on purpose -- no Moonstone-internal class
-// names, which would break on a component upgrade that changes nothing this spec is about.
+// side panel (#61, jcontent#2700). Every selector below is either a data-sel-role attribute this
+// module sets on purpose, one of its own element ids, or a role/label -- no class names and no
+// Moonstone internals. Classes are out because the board's stylesheet became a CSS module in #69:
+// its class names are hashed at build time and are not a contract anything may select on.
 //
 // <h3>What this suite can and cannot see of that panel</h3>
 // The panel's BODY is jContent's, loaded at runtime from its './ContentSidePanel' federated module.
@@ -43,7 +44,7 @@ const FINISHED = 'zzui Ship the release notes';
 // hovered or focused, so every interaction with it goes through .focus() first -- which triggers
 // the same `tr:focus-within` rule a keyboard user gets, rather than forcing a click on something
 // no user could see.
-const KEBAB = '.task-board__row-actions button';
+const KEBAB = '[data-sel-role="task-board-row-actions"] button';
 
 function openBoard() {
     cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
@@ -126,7 +127,7 @@ function previewFromRow(targetName: string, force = false) {
     openRowMenu(targetName, force);
     cy.contains('[role="menuitem"], li', 'Preview in a new tab').should('be.visible');
     cy.contains('[role="menuitem"], li', /^Preview$/).click({force});
-    cy.get('.task-board__preview').should('be.visible');
+    cy.get('[data-sel-role="task-board-preview"]').should('be.visible');
 }
 
 function openPreview(targetName: string) {
@@ -169,8 +170,8 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
         rowFor(OLDEST).within(() => {
             // The Task cell stacks the title with the created-by line; Owner and State are their
             // own cells, and priority is carried by the WORD, never by weight alone.
-            cy.contains('.task-board__task-cell', OLDEST).should('be.visible');
-            cy.contains('.task-board__meta', 'Created by:').should('be.visible');
+            cy.contains('[data-sel-role="task-board-task-cell"]', OLDEST).should('be.visible');
+            cy.contains('[data-sel-role="task-board-meta"]', 'Created by:').should('be.visible');
             cy.contains('High').should('be.visible');
             cy.contains('Unassigned').should('be.visible');
             cy.contains('Active').should('be.visible');
@@ -254,27 +255,27 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
     it('previews the content under review beside the board, and closes again', () => {
         openPreview(REVIEW_TARGET_NAME);
 
-        cy.get('.task-board__preview').should('be.visible').within(() => {
+        cy.get('[data-sel-role="task-board-preview"]').should('be.visible').within(() => {
             // The panel names both what it shows and the task it was opened for, and it is a
             // dialog that does not claim to be modal (the board behind it stays usable).
             cy.contains('Task:').should('be.visible');
         });
-        cy.get('.task-board__preview').should('have.attr', 'role', 'dialog');
+        cy.get('[data-sel-role="task-board-preview"]').should('have.attr', 'role', 'dialog');
 
         cy.get('[aria-label="Close preview"]').click();
-        cy.get('.task-board__preview').should('not.exist');
+        cy.get('[data-sel-role="task-board-preview"]').should('not.exist');
     });
 
     it('falls back to the plain preview, and says so, where jContent cannot supply its panel', () => {
         openPreview(REVIEW_TARGET_NAME);
 
-        cy.get('.task-board__preview').within(() => {
+        cy.get('[data-sel-role="task-board-preview"]').within(() => {
             // The frame, and a caption naming what is missing and why -- not an error, and not an
             // empty panel: the board is usable on an installation without jContent, which is the
             // whole reason it does not simply link out to it.
-            cy.get('iframe.task-board__preview-frame').should('exist');
-            cy.contains('.task-board__preview-caption', 'jContent').should('be.visible');
-            cy.contains('.task-board__preview-caption', 'not installed').should('be.visible');
+            cy.get('iframe[data-sel-role="task-board-preview-frame"]').should('exist');
+            cy.contains('[data-sel-role="task-board-preview-caption"]', 'jContent').should('be.visible');
+            cy.contains('[data-sel-role="task-board-preview-caption"]', 'not installed').should('be.visible');
             // No tab strip of its own in this state -- the tabs are jContent's, and jContent is
             // exactly what is absent. (Scoped to the panel: the board's scope selector is a
             // tablist too, and it is on screen behind this one.)
@@ -288,7 +289,7 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
         search('review-target');
 
         previewFromRow(REVIEW_TARGET_NAME);
-        cy.get('.task-board__preview').should('contain.text', REVIEW_TARGET_NAME);
+        cy.get('[data-sel-role="task-board-preview"]').should('contain.text', REVIEW_TARGET_NAME);
 
         // Same single instance, re-targeted: this is the interaction that tears down whatever the
         // panel was showing and builds it again for the other node (in the mounted case, a whole
@@ -296,8 +297,8 @@ describe('My Tasks screen (rendered UI, via the admin dashboard tile)', () => {
         // reused), and the failure it guards against is two panels on top of each other, or one
         // still showing the node it was opened on.
         previewFromRow(OTHER_REVIEW_TARGET_NAME, true);
-        cy.get('.task-board__preview').should('have.length', 1);
-        cy.get('.task-board__preview').should('contain.text', OTHER_REVIEW_TARGET_NAME);
-        cy.get('.task-board__preview').should('not.contain.text', REVIEW_TARGET_NAME);
+        cy.get('[data-sel-role="task-board-preview"]').should('have.length', 1);
+        cy.get('[data-sel-role="task-board-preview"]').should('contain.text', OTHER_REVIEW_TARGET_NAME);
+        cy.get('[data-sel-role="task-board-preview"]').should('not.contain.text', REVIEW_TARGET_NAME);
     });
 });

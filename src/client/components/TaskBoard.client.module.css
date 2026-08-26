@@ -1,16 +1,16 @@
-/* Plain (non-CSS-modules) stylesheet, imported for its side effect only: this component is
-   bundled TWICE, by the two Vite builds this module runs (vite.config.mjs -> the SSR view and its
-   hydrated island, vite.federation.config.mjs -> the admin-dashboard remote), which package CSS
-   very differently -- the first concatenates it into dist/assets/style.css served with the page,
-   the second emits a chunk the federation runtime injects as a <link> when './init' loads. A
-   side-effect-only import of a plain stylesheet is the one form that behaves identically under
-   both (and did under the webpack build the federation half replaced in #61, which disagreed with
-   Vite on the CSS-modules export shape outright); class names here are hand-prefixed instead of
-   scoped by the bundler, to avoid collisions.
+/* A CSS module: every class below is rewritten by Vite to a hashed name and reached from the
+   component as `styles.x`, which is what the rest of the recent Jahia React UI does
+   (content-versioning, formidable-elements, page-audit). Until #69 this had to be a plain
+   side-effect stylesheet with hand-prefixed BEM names, because two bundlers with different
+   CSS-modules semantics consumed the same file; one build now owns it, so the bundler does the
+   scoping and the names can be short and local.
+
+   The hashing is also why the Cypress suite selects `data-sel-role` attributes rather than
+   classes: a hashed name is not a stable contract, an attribute the component sets on purpose is.
 
    Uses Moonstone's own spacing tokens (not fixed px values) so this keeps matching the rest of
    the Jahia admin UI if Moonstone's scale ever changes, instead of drifting out of sync with it. */
-.task-board__content {
+.content {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-medium);
@@ -28,7 +28,7 @@
 
 /* The scope tabs and the "Show finished" toggle share one row: the toggle narrows the same
    listing the tabs do, so it belongs beside them rather than in the toolbar below. */
-.task-board__scopes {
+.scopes {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -36,17 +36,17 @@
     gap: var(--spacing-medium);
 }
 
-.task-board__show-finished {
+.showFinished {
     display: flex;
     align-items: center;
     gap: var(--spacing-small);
 }
 
-.task-board__show-finished label {
+.showFinished label {
     cursor: pointer;
 }
 
-.task-board__toolbar {
+.toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -57,11 +57,11 @@
 /* The scope tabs' tabpanel (#62). Purely an ARIA container -- it exists so each tab has something
    to point aria-controls at -- so it is made transparent to layout: it re-creates the flex-column
    context the table and the EmptyData block used to sit in as direct children of
-   .task-board__content. flex-basis stays `auto` (not 0) on purpose: with a basis of 0 the panel
+   .content. flex-basis stays `auto` (not 0) on purpose: with a basis of 0 the panel
    would be capped at the free space and a full page of rows would overflow it into a region the
    scroll container above can no longer reach. flex-grow is what still lets the empty state fill
    the remaining height, as it did when EmptyData's own flexFluid faced this container directly. */
-.task-board__panel {
+.panel {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
@@ -69,13 +69,13 @@
     min-width: 0;
 }
 
-.task-board__search {
+.search {
     display: flex;
     align-items: center;
     gap: var(--spacing-small);
 }
 
-.task-board__search-input {
+.searchInput {
     width: 260px;
 }
 
@@ -85,7 +85,7 @@
    grow with their content instead of clipping it; min-height keeps sparse rows on Moonstone's
    native rhythm. Rows are flex containers in Moonstone's DataTable, so top-align the columns --
    a centred one-line State chip floating beside a three-line Task cell reads as misaligned. */
-.task-board__content tbody tr {
+.content tbody tr {
     height: auto;
     min-height: 48px;
     align-items: flex-start;
@@ -97,7 +97,7 @@
    narrow viewport a wrapped flex row scatters the State/Actions cells underneath the Task cell,
    which reads as a broken table -- below the table's minimum usable width the board scrolls
    horizontally instead (overflow-x on the same element that already scrolls vertically). */
-.task-board__content {
+.content {
     overflow-x: auto;
 
     /* Both required for overflow-x to ever engage: as a flex item this element's min-width
@@ -111,9 +111,11 @@
 /* moonstone-alpha's ContentLayout has the same flex-item gap one level up: its paper chain has
    no min-width:0, so it sizes to the table's max-content width and pushes the whole dashboard
    past the (overflow:hidden) viewport instead of letting the board's own overflow-x engage.
-   Constrained from here until the alpha component ships its own containment; class names are
-   the component's stable public ones, not hashed. :where() keeps specificity at zero. */
-:where(.moonstoneAlpha-contentLayout_paperContainer, .moonstoneAlpha-contentLayout_paper) {
+   Constrained from here until the alpha component ships its own containment. :where() keeps
+   specificity at zero, and :global() is REQUIRED: these are the alpha component's own stable
+   public class names, so this file must not rewrite them the way it rewrites its own -- without
+   it the selector is hashed into something that matches nothing, and does so silently. */
+:where(:global(.moonstoneAlpha-contentLayout_paperContainer), :global(.moonstoneAlpha-contentLayout_paper)) {
     min-width: 0;
     max-width: 100%;
 }
@@ -124,25 +126,25 @@
    760px when Due and Priority were added (#66), then LOWERED from 1020px when the Actions column
    shrank from 280px to the 80px kebab: every fixed column resized here has to be carried into
    this number too, or the fixed columns either eat the flexible Task column or leave it a gap. */
-.task-board__content table {
+.content table {
     width: 100%;
     min-width: 820px;
 }
 
-.task-board__content thead tr,
-.task-board__content tbody tr {
+.content thead tr,
+.content tbody tr {
     flex-wrap: nowrap;
 }
 
-.task-board__content thead th:first-child,
-.task-board__content tbody td:first-child {
+.content thead th:first-child,
+.content tbody td:first-child {
     /* Basis 0, not auto: with auto the basis is the cell's unwrapped text width, which inflates
        the whole row to the longest summary line instead of letting the text wrap in place. */
     flex: 1 1 0;
     min-width: 200px;
 }
 
-.task-board__content tbody td {
+.content tbody td {
     height: auto;
     padding-top: var(--spacing-small);
     padding-bottom: var(--spacing-small);
@@ -151,13 +153,13 @@
 /* The Task column's cell: title line, then the workflow summary and the created-by/candidates
    captions underneath it. A table cell is vertically centred by default, which reads badly for a
    three-line cell sitting next to one-line ones, hence the explicit column layout. */
-.task-board__task-cell {
+.taskCell {
     display: flex;
     flex-direction: column;
     gap: 2px;
 }
 
-.task-board__task-title {
+.taskTitle {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
@@ -167,7 +169,7 @@
 /* The Due column's cell: date, then the "Overdue" chip underneath it. Stacked rather than inline
    because the column is 140px and a chip beside a date would overflow it; align-items keeps the
    chip from stretching to the full cell width. */
-.task-board__due-cell {
+.dueCell {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -176,17 +178,17 @@
 
 /* The linked target page's own title, shown beside the task title -- distinct from the rest of
    the plain cell text, since it is the clickable part. */
-.task-board__target-link {
+.targetLink {
     color: var(--color-accent_dark120, var(--color-accent));
     text-decoration: none;
 }
 
-.task-board__target-link:hover {
+.targetLink:hover {
     text-decoration: underline;
 }
 
-.task-board__meta,
-.task-board__summary {
+.meta,
+.summary {
     margin: 0;
 }
 
@@ -201,7 +203,7 @@
    button as it is reached. The --open modifier does the same while the menu itself is up, which is
    what keeps the button (and therefore its anchored menu) on screen after the pointer has left the
    row to travel down the menu. */
-.task-board__row-actions {
+.rowActions {
     display: flex;
     justify-content: flex-end;
     width: 100%;
@@ -209,9 +211,9 @@
     transition: opacity 120ms ease-in-out;
 }
 
-.task-board__content tbody tr:hover .task-board__row-actions,
-.task-board__content tbody tr:focus-within .task-board__row-actions,
-.task-board__row-actions--open {
+.content tbody tr:hover .rowActions,
+.content tbody tr:focus-within .rowActions,
+.rowActionsOpen {
     opacity: 1;
 }
 
@@ -219,7 +221,7 @@
    cell, not beside the menu that opens it: the Actions column is 80px now and could not hold a
    text box. Full width of that (flexible) column, with air above it so it doesn't crowd the
    created-by caption it follows. */
-.task-board__comment {
+.comment {
     width: 100%;
     margin-top: var(--spacing-small);
 }
@@ -231,7 +233,7 @@
    menu still opens on top of an already-open panel instead of behind it.
    Paper supplies the surface (background, elevation) and expects to be a block in a page flow,
    hence the margin/radius reset here. */
-.task-board__preview {
+.preview {
     position: fixed;
     top: 0;
     right: 0;
@@ -247,10 +249,10 @@
     margin-top: 0;
     border-radius: 0;
 
-    animation: task-board__preview-in 160ms ease-out;
+    animation: previewIn 160ms ease-out;
 }
 
-@keyframes task-board__preview-in {
+@keyframes previewIn {
     from {
         transform: translateX(100%);
     }
@@ -263,16 +265,16 @@
 /* Both the panel's entrance and the hover fade above are decoration -- the panel is fully usable
    without either, so neither is imposed on a viewer who has asked for less motion. */
 @media (prefers-reduced-motion: reduce) {
-    .task-board__preview {
+    .preview {
         animation: none;
     }
 
-    .task-board__row-actions {
+    .rowActions {
         transition: none;
     }
 }
 
-.task-board__preview-header {
+.previewHeader {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
@@ -283,7 +285,7 @@
 
 /* min-width:0 so a long page title wraps (or is squeezed) instead of pushing the close button off
    the panel -- a flex item's default min-width is its content's intrinsic width. */
-.task-board__preview-titles {
+.previewTitles {
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -293,7 +295,7 @@
 /* Everything below the header: whatever the panel manages to show for its target. Either jContent's
    own content side panel, mounted into the host below, or -- where jContent cannot supply one --
    the plain preview frame. */
-.task-board__preview-body {
+.previewBody {
     display: flex;
     flex-direction: column;
     flex: 1 1 auto;
@@ -305,12 +307,12 @@
    #2700), so the parent is what has to have a size -- hence flex + min-height:0 rather than a
    height of its own. overflow is hidden here because that panel scrolls its own body: a second
    scrollbar out here would scroll the tab strip off the top. */
-.task-board__preview-host {
+.previewHost {
     flex: 1 1 auto;
     min-height: 0;
 }
 
-.task-board__preview-loader {
+.previewLoader {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -318,7 +320,7 @@
 }
 
 /* The standalone fallback: a caption stating what is missing, above a full-bleed frame. */
-.task-board__preview-caption {
+.previewCaption {
     margin: 0;
     padding: var(--spacing-medium);
     border-bottom: 1px solid var(--color-gray_light);
@@ -326,7 +328,7 @@
 
 /* flex + min-height:0 so the frame takes the panel's whole remaining height rather than the
    150px an <iframe> is intrinsically sized at. */
-.task-board__preview-frame {
+.previewFrame {
     flex: 1 1 auto;
     min-height: 0;
     width: 100%;

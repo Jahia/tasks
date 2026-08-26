@@ -1,5 +1,7 @@
 import type {MutableRefObject, ReactElement} from 'react';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {useApolloClient} from '@apollo/client';
+import type {DocumentNode} from '@apollo/client';
 import {AddComment, Banner, Button, Chip, DataTable, EmptyData, Header, Input, Loader, Menu, MenuItem, MoreVert, OpenInNew, Search, Separator, Switch, Tab, TabItem, Textarea, Typography, Visibility} from '@jahia/moonstone';
 // Type-only, so nothing is imported at runtime from this subpath: the DataTable *component* comes
 // from the package root above (moonstone re-exports it there), but its column/sort types are only
@@ -10,7 +12,7 @@ import type {DataTableColumn} from '@jahia/moonstone/DataTable';
 // deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
 // the matching deep path in moonstone-alpha.d.ts.
 import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayout';
-import {callGraphQL} from '../lib/graphqlClient';
+import {graphqlErrorMessage} from '../lib/graphqlErrors';
 import {formatDate, useTasksTranslation} from '../lib/i18n';
 import type {Translate} from '../lib/i18n';
 import {
@@ -33,13 +35,13 @@ import {
     waitingDaysSince,
     waitingLabel
 } from './taskBoard.shared';
-import type {ChipColor, TaskBoardConnection, TaskBoardNode, TaskScope} from './taskBoard.shared';
+import type {ChipColor, TaskBoardConnection, TaskBoardNode, TaskBoardQueryResult, TaskScope} from './taskBoard.shared';
 import {priorityLabel, stateLabel, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import {UPDATE_TASK_DATA_TITLE_MUTATION} from './simpleWorkflow.shared';
 import TaskPreviewPanel from './TaskPreviewPanel';
 import type {PreviewTarget} from './TaskPreviewPanel';
 import {resolvePreviewLanguage} from './taskPreview.shared';
-import './TaskBoard.client.css';
+import styles from './TaskBoard.client.module.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
 const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
@@ -50,9 +52,8 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 // Every user-visible string on this board goes through useTasksTranslation() (#62), against the
 // 'tasks' namespace in src/main/resources/javascript/locales/{en,fr,de}.json. The second argument
-// of every t() call is the English text: it is both the source-readable label and the value
-// actually rendered on the SSR-island path, where no i18next instance exists to translate against
-// -- see the header of ../lib/i18n.ts.
+// of every t() call is the English text: it is both the source-readable label and what actually
+// renders if no i18next instance can be reached -- see the header of ../lib/i18n.ts.
 
 // active: ready to be picked up. started: in progress. suspended: parked. finished: done.
 const STATE_CHIP_COLOR: Record<string, ChipColor> = {
@@ -165,13 +166,12 @@ const DEFAULT_SORT_DIRECTION: SortDirection = (() => {
 type TaskBoardProps = {
     initialConnection: TaskBoardConnection;
     initialScope: TaskScope;
-    graphqlEndpoint: string;
     currentUserKey: string;
     canReviewAll: boolean;
-    // Language the server resolves outcome labels in. Passed down from whoever rendered the board
-    // (the SSR view knows the page's own locale), so the labels the island re-fetches match the
-    // ones it was handed. Omitted -- e.g. from the admin dashboard route, which has no server
-    // render pass -- the server falls back to the request's own locale.
+    // Language the server resolves outcome labels in, passed down by whoever rendered the board so
+    // the labels it re-fetches match the ones it was handed. Omitted -- as the admin dashboard
+    // route does when the shell publishes no UI language -- the server falls back to the request's
+    // own locale.
     language?: string;
 };
 
@@ -223,7 +223,7 @@ type MenuAction = {
     // same row can now share a mutation (every outcome of a workflow task runs completeTask).
     key: string;
     label: string;
-    mutation: string;
+    mutation: DocumentNode;
     variables: {id: string} & Record<string, unknown>;
     // Set only on the one-click fast path (#67), where the button does more than its outcome label
     // says. Rendered as the button's tooltip.
@@ -234,7 +234,7 @@ type MenuAction = {
 // its own mutation, and only when the reviewer actually typed one -- the same two-step the legacy
 // board did (its sendNewStatus() submitted the taskData form, then posted the state change).
 type TaskActionRequest = {
-    mutation: string;
+    mutation: DocumentNode;
     variables: Record<string, unknown>;
     taskDataComment?: {id: string; comment: string};
 };
@@ -317,7 +317,7 @@ function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOp
     // Reject before accept, matching the requested layout order, regardless of the order the
     // workflow happens to declare its outcomes in -- see REJECT_OUTCOME_PATTERN for why this
     // reads the outcome's name and the button reads its label.
-    const decisionsFor = (mutation: string, hint?: string): MenuAction[] => [...task.possibleOutcomeDetails]
+    const decisionsFor = (mutation: DocumentNode, hint?: string): MenuAction[] => [...task.possibleOutcomeDetails]
         .sort((a, b) => Number(!REJECT_OUTCOME_PATTERN.test(a.name)) - Number(!REJECT_OUTCOME_PATTERN.test(b.name)))
         .map(outcome => ({
             key: outcome.name,
@@ -500,7 +500,8 @@ function TaskRowActions({task, currentUserKey, canReviewAll, isBusy, isCommentOp
     return (
         <div
             ref={anchorRef}
-            className={`task-board__row-actions${isMenuOpen ? ' task-board__row-actions--open' : ''}`}
+            className={isMenuOpen ? `${styles.rowActions} ${styles.rowActionsOpen}` : styles.rowActions}
+            data-sel-role="task-board-row-actions"
             // Escape closes the menu: Moonstone's Menu dismisses itself on its own click-away
             // overlay only, and never on a key. The handler sits on this wrapper because the menu
             // is rendered as a DOM child of it (it is merely position:fixed), so a keydown on the
@@ -574,7 +575,7 @@ function TaskCommentEditor({taskId, initialValue, drafts, isDisabled}: Readonly<
             // Opened by an explicit menu choice, so the cursor belongs in it: without this the
             // reviewer's next keystroke goes nowhere, the menu having just closed.
             autoFocus
-            className="task-board__comment"
+            className={styles.comment}
             value={value}
             rows={3}
             isDisabled={isDisabled}
@@ -618,7 +619,7 @@ function DueCell({dueDate, state, locale}: Readonly<DueCellProps>) {
     const status = dueStatus(dueDate, state);
 
     return (
-        <div className="task-board__due-cell" title={formatDate(locale, 'dateTime', dueDate) ?? undefined}>
+        <div className={styles.dueCell} title={formatDate(locale, 'dateTime', dueDate) ?? undefined}>
             <Typography variant="body">{formatted}</Typography>
             {/* The overdue signal is this WORD, on a chip that is additionally red -- the colour
                 repeats it, it never carries it alone (same rule the Waiting chip follows). */}
@@ -654,14 +655,14 @@ function TaskCell({task, showCandidates, locale, isCommentOpen, isBusy, commentD
     const summaryLine = task.workflowSummary ?? task.description;
 
     return (
-        <div className="task-board__task-cell">
-            <div className="task-board__task-title">
+        <div className={styles.taskCell} data-sel-role="task-board-task-cell">
+            <div className={styles.taskTitle}>
                 <Typography component="span" weight="semiBold" variant="body">
                     {task.title ?? t('common.untitledTask', 'Untitled task')}
                 </Typography>
                 {targetTitle && task.targetNode?.url && (
                     <a
-                        className="task-board__target-link"
+                        className={styles.targetLink}
                         href={task.targetNode.url}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -671,12 +672,12 @@ function TaskCell({task, showCandidates, locale, isCommentOpen, isBusy, commentD
                 )}
             </div>
             {summaryLine && (
-                <Typography component="p" variant="body" className="task-board__summary">
+                <Typography component="p" variant="body" className={styles.summary}>
                     {summaryLine}
                 </Typography>
             )}
             {createdDate && (
-                <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                <Typography component="p" variant="caption" weight="light" className={styles.meta} data-sel-role="task-board-meta">
                     {t('board.meta.createdBy', 'Created by: {{creator}}, on {{date}}', {
                         creator: task.creator ?? t('common.unknown', 'Unknown'),
                         date: createdDate
@@ -684,7 +685,7 @@ function TaskCell({task, showCandidates, locale, isCommentOpen, isBusy, commentD
                 </Typography>
             )}
             {showCandidates && task.candidateDisplayNames.length > 0 && (
-                <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                <Typography component="p" variant="caption" weight="light" className={styles.meta} data-sel-role="task-board-meta">
                     {t('board.meta.availableTo', 'Available to: {{names}}', {
                         names: task.candidateDisplayNames.join(', ')
                     })}
@@ -704,12 +705,17 @@ function TaskCell({task, showCandidates, locale, isCommentOpen, isBusy, commentD
     );
 }
 
-export default function TaskBoard({initialConnection, initialScope, graphqlEndpoint, currentUserKey, canReviewAll, language}: Readonly<TaskBoardProps>) {
-    // `language` doubles as the date-formatting locale on the SSR-island path: it is the page's own
-    // UI locale (RenderContext#getUILocale), and there is no i18next instance out there to read one
-    // from. Inside the app shell the shell's own i18next language wins over it -- see
-    // resolveLocale() in ../lib/i18n.ts.
+export default function TaskBoard({initialConnection, initialScope, currentUserKey, canReviewAll, language}: Readonly<TaskBoardProps>) {
+    // `language` is also offered as the date-formatting locale, but the shell's own i18next
+    // language wins over it wherever there is one -- see resolveLocale() in ../lib/i18n.ts.
     const {t, tPlural, locale} = useTasksTranslation(language);
+    // The app shell's client, from the ApolloProvider it wraps every route in. Used imperatively
+    // (client.query / client.mutate) rather than through useQuery/useMutation on purpose: this
+    // board drives its own Relay cursor pagination out of the cursorsByPage ref below, jumping
+    // back to pages it has already visited, and Apollo's fetchMore APPENDS pages rather than
+    // replacing them -- the opposite of what a paged table wants. The hooks would also have to be
+    // declared per mutation, while a row's action carries the document it runs as data.
+    const client = useApolloClient();
     const [currentPage, setCurrentPage] = useState(1);
     const [connection, setConnection] = useState(initialConnection);
     const [isLoading, setLoading] = useState(false);
@@ -761,23 +767,32 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         setLoading(true);
         setError(null);
         try {
-            const data = await callGraphQL<{taskBoard: TaskBoardConnection}>(graphqlEndpoint, TASK_BOARD_QUERY, {
-                first: itemsPerPage,
-                after: cursorsByPage.current.get(page),
-                search: search === '' ? null : search,
-                ...toSortArgument(sortColumn, sortDirection),
-                filterState: showFinished ? ALL_STATES : NOT_FINISHED_STATES,
-                scope,
-                language: language ?? null
+            // no-cache throughout this component: a page of this connection is only ever read
+            // once, straight into state, and the board re-fetches after every mutation because a
+            // state change can move a row out of the current filter entirely. Caching it would
+            // also mean writing an argument-keyed, page-shaped connection into the shell's
+            // normalized cache, which other modules read for whole nodes.
+            const {data} = await client.query<TaskBoardQueryResult>({
+                query: TASK_BOARD_QUERY,
+                variables: {
+                    first: itemsPerPage,
+                    after: cursorsByPage.current.get(page),
+                    search: search === '' ? null : search,
+                    ...toSortArgument(sortColumn, sortDirection),
+                    filterState: showFinished ? ALL_STATES : NOT_FINISHED_STATES,
+                    scope,
+                    language: language ?? null
+                },
+                fetchPolicy: 'no-cache'
             });
             setConnection(data.taskBoard);
             setCurrentPage(page);
         } catch (e) {
-            setError(e instanceof Error ? e.message : t('common.error.load', 'Unable to load tasks.'));
+            setError(graphqlErrorMessage(e, t('common.error.load', 'Unable to load tasks.')));
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search, sortColumn, sortDirection, scope, showFinished, language, t]);
+    }, [client, itemsPerPage, search, sortColumn, sortDirection, scope, showFinished, language, t]);
 
     // itemsPerPage/search/sort/scope/showFinished all change what the *first* page even means, so
     // none of them can be applied by just re-fetching the current page -- every cached cursor is
@@ -793,8 +808,8 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
         cursorsByPage.current = new Map([[1, undefined]]);
         loadPage(1);
         // Deliberately reacts only to the six inputs that redefine page 1: loadPage already
-        // closes over all of them (declared above) plus graphqlEndpoint/currentPage, which this
-        // effect doesn't care about.
+        // closes over all of them (declared above) plus the Apollo client and currentPage, which
+        // this effect doesn't care about.
     }, [itemsPerPage, search, sortColumn, sortDirection, scope, showFinished]);
 
     const handlePageChange = (nextPage: number) => {
@@ -827,13 +842,14 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                 // to the workflow engine, which may move the task (and its taskData child) out of
                 // reach -- so a comment saved afterwards could have nowhere left to land. Its
                 // failure aborts the decision too, rather than silently completing without it.
-                await callGraphQL(graphqlEndpoint, UPDATE_TASK_DATA_TITLE_MUTATION, {
-                    id: taskDataComment.id,
-                    title: taskDataComment.comment
+                await client.mutate({
+                    mutation: UPDATE_TASK_DATA_TITLE_MUTATION,
+                    variables: {id: taskDataComment.id, title: taskDataComment.comment},
+                    fetchPolicy: 'no-cache'
                 });
             }
 
-            await callGraphQL(graphqlEndpoint, mutation, variables);
+            await client.mutate({mutation, variables, fetchPolicy: 'no-cache'});
             // The row's comment editor has done its job once the action it was written for landed:
             // its text has either just been saved (taskDataComment above) or was never touched.
             // Dropped here rather than left open, so the reloaded row doesn't come back carrying a
@@ -843,11 +859,11 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             setOpenCommentTaskId(current => (current === actedTaskId ? null : current));
             await loadPage(currentPage);
         } catch (e) {
-            setError(e instanceof Error ? e.message : t('common.error.action', 'Unable to complete this action.'));
+            setError(graphqlErrorMessage(e, t('common.error.action', 'Unable to complete this action.')));
         } finally {
             setBusyTaskId(null);
         }
-    }, [graphqlEndpoint, currentPage, loadPage, t]);
+    }, [client, currentPage, loadPage, t]);
 
     const handleOpenComment = useCallback((taskId: string) => setOpenCommentTaskId(taskId), []);
     // jContent's side panel shows ONE translation of the target throughout, so which one it opens
@@ -1016,8 +1032,8 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
             header={<Header title={t('board.title', 'Tasks')}/>}
             content={(
                 <>
-                    <div className="task-board__content">
-                        <div className="task-board__scopes">
+                    <div className={styles.content}>
+                        <div className={styles.scopes}>
                             {/* Moonstone renders Tab as role="tablist" and each TabItem as a
                                 <button role="tab" aria-selected> with arrow-key navigation between
                                 siblings, so the selector is already operable from the keyboard. What it
@@ -1036,7 +1052,7 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                                     />
                                 ))}
                             </Tab>
-                            <div className="task-board__show-finished">
+                            <div className={styles.showFinished}>
                                 {/* Moonstone's Switch spreads its rest props onto the underlying
                                     <input type="checkbox">, so this id is the input's own -- which is
                                     what makes the <label for> below a real accessible name for the
@@ -1054,14 +1070,14 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                                 </label>
                             </div>
                         </div>
-                        <div className="task-board__toolbar">
+                        <div className={styles.toolbar}>
                             <Typography variant="caption" weight="light">
                                 {tPlural('board.taskCount', connection.pageInfo.totalCount, '{{count}} task', '{{count}} tasks')}
                             </Typography>
-                            <div className="task-board__search">
+                            <div className={styles.search}>
                                 <Typography id="task-board-search-label" variant="body" weight="semiBold">{searchLabel}</Typography>
                                 <Input
-                                    className="task-board__search-input"
+                                    className={styles.searchInput}
                                     icon={<Search/>}
                                     placeholder={t('board.search.placeholder', 'Search tasks...')}
                                     value={searchInput}
@@ -1084,14 +1100,14 @@ export default function TaskBoard({initialConnection, initialScope, graphqlEndpo
                         )}
                         <div
                             id={SCOPE_PANEL_ID}
-                            className="task-board__panel"
+                            className={styles.panel}
                             role="tabpanel"
                             aria-labelledby={SCOPE_TAB_ID(scope)}
                         >
                             {boardContent}
                         </div>
                     </div>
-                    {/* Outside .task-board__content on purpose: that element is the board's own scroll
+                    {/* Outside styles.content on purpose: that element is the board's own scroll
                         container (overflow on both axes), and this panel is pinned to the viewport
                         rather than to the table it floats over. */}
                     {previewTarget && (

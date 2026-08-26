@@ -1,7 +1,7 @@
-import {useEffect, useState} from 'react';
+import {useQuery} from '@apollo/client';
 import {Banner, Loader} from '@jahia/moonstone';
 import TaskBoard, {DEFAULT_PAGE_SIZE} from '../client/components/TaskBoard.client';
-import {callGraphQL} from '../client/lib/graphqlClient';
+import {graphqlErrorMessage} from '../client/lib/graphqlErrors';
 import {useTasksTranslation} from '../client/lib/i18n';
 import {DEFAULT_SORT_BY, DEFAULT_SORT_ORDER, INITIAL_SCOPE, INITIAL_TASK_BOARD_QUERY, NOT_FINISHED_STATES} from '../client/components/taskBoard.shared';
 import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.shared';
@@ -10,10 +10,6 @@ import type {InitialTaskBoardQueryResult} from '../client/components/taskBoard.s
 // (before TaskBoard's itemsPerPage state exists) would disagree with the page size TaskBoard
 // starts life expecting once it takes over pagination.
 const PAGE_SIZE = DEFAULT_PAGE_SIZE;
-// Relative to the current origin -- there's no SSR-side buildEndpointUrl() helper available
-// here (that's part of @jahia/javascript-modules-library, forbidden outside server components),
-// but a plain relative path resolves correctly from a route rendered in the browser.
-const GRAPHQL_ENDPOINT = '/modules/graphql';
 
 /**
  * The language the server resolves workflow outcome labels in (GqlTaskBoard#getPossibleOutcomeDetails).
@@ -30,71 +26,69 @@ function uiLanguage(): string | undefined {
     return shell.contextJsParameters?.uilang;
 }
 
-type LoadState =
-    | {status: 'loading'}
-    | {status: 'error'; message: string}
-    | {status: 'ready'; data: InitialTaskBoardQueryResult};
-
 /**
  * Entry point for the 'tasks' adminRoute (see ../javascript/init.tsx), which overrides
  * jahia-dashboard's own built-in 'tasks' dashboard tab (normally an iframe onto the
  * jnt:user 'tasks' content template -- see init.tsx for why that never renders any content).
- * Unlike CurrentUserTasksView.server.tsx (the jnt:currentUserTasks content view, SSR-fetched),
- * this route is mounted directly by the admin shell with no server-side render pass, so it
- * fetches its own initial page here instead of receiving it as a prop.
+ *
+ * This route is mounted directly by the admin shell with no server-side render pass, so it fetches
+ * its own first page here and hands it to the board as initialConnection. That was already true
+ * before #69; what changed is that it is now the module's ONLY renderer of the board -- the
+ * server-rendered jnt:currentUserTasks view that used to fetch the same page through
+ * javascript-modules-engine is gone.
+ *
+ * No ApolloProvider anywhere in this module: the app shell registers one at target root:12,
+ * wrapping the whole React tree that every registered route renders inside, so useQuery here binds
+ * to the shell's own client and shares its link. (Verified in app-shell's own bundle; jcontent's
+ * route calls useApolloClient() the same way, with no provider of its own.)
  */
 export function TasksDashboardApp() {
     // This route runs inside the app shell, so i18next is initialized here and init.tsx has already
     // asked it for the 'tasks' namespace -- these two strings are the only ones this wrapper owns,
     // the board itself translating everything else.
     const {t} = useTasksTranslation();
-    const [state, setState] = useState<LoadState>({status: 'loading'});
-
     const language = uiLanguage();
 
-    useEffect(() => {
-        let cancelled = false;
-        callGraphQL<InitialTaskBoardQueryResult>(GRAPHQL_ENDPOINT, INITIAL_TASK_BOARD_QUERY, {
+    // no-cache, like every other operation this board runs: the result is a cursor-paginated
+    // connection the board re-fetches itself on every change, and it is handed straight to
+    // TaskBoard as its initial state rather than ever being read back from the cache. Writing it
+    // to the shell's normalized cache would buy nothing here and would put a page-shaped,
+    // argument-keyed connection into a cache other modules read for whole nodes.
+    const {data, loading, error} = useQuery<InitialTaskBoardQueryResult>(INITIAL_TASK_BOARD_QUERY, {
+        variables: {
             first: PAGE_SIZE,
             filterState: NOT_FINISHED_STATES,
             sortBy: DEFAULT_SORT_BY,
             sortOrder: DEFAULT_SORT_ORDER,
             language: language ?? null
-        })
-            .then(data => {
-                if (!cancelled) {
-                    setState({status: 'ready', data});
-                }
-            })
-            .catch(e => {
-                if (!cancelled) {
-                    setState({status: 'error', message: e instanceof Error ? e.message : t('common.error.load', 'Unable to load tasks.')});
-                }
-            });
-        return () => {
-            cancelled = true;
-        };
-        // Effectively mount-only: uiLanguage() reads a global the page sets before any remote
-        // loads, so this never actually changes for the life of the route.
-    }, [language, t]);
+        },
+        fetchPolicy: 'no-cache'
+    });
 
-    if (state.status === 'loading') {
+    if (loading) {
         return <Loader/>;
     }
 
-    if (state.status === 'error') {
-        return <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">{state.message}</Banner>;
+    // `data` is undefined whenever `error` is set: the default errorPolicy discards partial data,
+    // which is what the hand-rolled client this replaced did too. The second half of the condition
+    // is therefore about the impossible case, and exists so the render below can dereference
+    // `data` without a non-null assertion.
+    if (error || !data) {
+        return (
+            <Banner role="alert" title={t('common.error.title', 'Something went wrong')} variant="danger">
+                {graphqlErrorMessage(error, t('common.error.load', 'Unable to load tasks.'))}
+            </Banner>
+        );
     }
 
     // The initial query returns page 1 of the scope the board opens on -- "All tasks" for every
     // viewer (see INITIAL_SCOPE) -- and that page is the board's initial state.
     return (
         <TaskBoard
-            initialConnection={state.data[INITIAL_SCOPE]}
+            initialConnection={data[INITIAL_SCOPE]}
             initialScope={INITIAL_SCOPE}
-            graphqlEndpoint={GRAPHQL_ENDPOINT}
-            currentUserKey={state.data.taskBoardCurrentUserKey}
-            canReviewAll={state.data.taskBoardCanReviewAll}
+            currentUserKey={data.taskBoardCurrentUserKey}
+            canReviewAll={data.taskBoardCanReviewAll}
             language={language}
         />
     );

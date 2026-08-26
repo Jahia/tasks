@@ -1,6 +1,13 @@
 import {useEffect, useRef, useState} from 'react';
 import {Button, Close, Loader, Paper, Typography} from '@jahia/moonstone';
 import {useTasksTranslation} from '../lib/i18n';
+// The board's stylesheet, not one of this panel's own: the panel is a part of the board (its rules
+// have always lived in that file, beside the row-action styles that reveal the button opening it)
+// and it shares `meta` with the board's captions. Importing the same module from both is how a CSS
+// module is shared -- Vite emits one stylesheet and both get the same name map. Until #69 this
+// component needed no import at all, because the file was a plain global stylesheet TaskBoard
+// pulled in for its side effect.
+import styles from './TaskBoard.client.module.css';
 
 /**
  * The task board's "Preview" side panel (#61), showing jContent's OWN content side panel
@@ -205,31 +212,31 @@ function PreviewBody({path, language, url, frameTitle}: Readonly<PreviewBodyProp
 
     if (status === 'standalone') {
         return (
-            <div className="task-board__preview-body">
+            <div className={styles.previewBody}>
                 {/* Above the frame, not below it: the frame takes the rest of the panel, and a
                     caption under it would sit off-screen on a short viewport -- which is where a
                     sentence explaining why there are no tabs is least use. */}
-                <Typography component="p" variant="caption" weight="light" className="task-board__preview-caption">
+                <Typography component="p" variant="caption" weight="light" className={styles.previewCaption} data-sel-role="task-board-preview-caption">
                     {t(
                         'board.preview.standalone',
                         'Only the page preview is available here: details, usages and history come from jContent, which is not installed on this server.'
                     )}
                 </Typography>
-                <iframe className="task-board__preview-frame" src={url} title={frameTitle}/>
+                <iframe className={styles.previewFrame} src={url} title={frameTitle} data-sel-role="task-board-preview-frame"/>
             </div>
         );
     }
 
     return (
-        <div className="task-board__preview-body">
+        <div className={styles.previewBody}>
             {status === 'loading' && (
-                <div className="task-board__preview-loader">
+                <div className={styles.previewLoader}>
                     <Loader/>
                 </div>
             )}
             {/* Never given React children: everything inside it belongs to jContent's own root, and
                 React must have no opinion about that subtree. */}
-            <div ref={hostRef} className="task-board__preview-host"/>
+            <div ref={hostRef} className={styles.previewHost}/>
         </div>
     );
 }
@@ -261,16 +268,17 @@ export default function TaskPreviewPanel({target, onClose}: Readonly<TaskPreview
     return (
         <Paper
             hasPadding={false}
-            className="task-board__preview"
+            className={styles.preview}
+            data-sel-role="task-board-preview"
             role="dialog"
             // Deliberately no aria-modal: nothing behind this panel is inert, and claiming
             // otherwise would tell a screen reader the rest of the board is unavailable.
             aria-label={label}
         >
-            <div className="task-board__preview-header">
-                <div className="task-board__preview-titles">
+            <div className={styles.previewHeader}>
+                <div className={styles.previewTitles}>
                     <Typography component="h2" variant="subheading" weight="semiBold">{target.title}</Typography>
-                    <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                    <Typography component="p" variant="caption" weight="light" className={styles.meta}>
                         {t('board.preview.task', 'Task: {{title}}', {title: target.taskTitle})}
                     </Typography>
                 </div>
