@@ -25,15 +25,16 @@ import org.slf4j.LoggerFactory;
 import javax.jcr.RepositoryException;
 import javax.jcr.Value;
 import javax.jcr.query.Query;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -124,6 +125,25 @@ public final class TaskBoardQueryExtensions {
     // nothing (see appendScopeFilter). Mirror image of the canReviewAll branch's always-true
     // "jcr:createdBy is not null": every task node has jcr:createdBy.
     private static final String NEVER_MATCHES_CONDITION = "task.[jcr:createdBy] is null";
+
+    // A closed task stays on the board -- somebody needs to see that the work was done, and which
+    // of it -- but never above live work, whatever the caller sorted by. So the board is not one
+    // ordered list but two, open then closed, each ordered by the caller's own choice: see
+    // executePage (which windows across the pair) and scannedPage (which sorts on the group first).
+    //
+    // "finished" is the only terminal state the board lists. "cancelled" exists in the node type's
+    // choicelist and nothing in this UI ever writes it, so it is not part of this group -- a task
+    // in that state is excluded by the caller's filterState rather than sorted to the bottom.
+    private static final String CLOSED_STATE = "finished";
+
+    // Note the null test. A jnt:task created programmatically can have no state property at all
+    // (the node type's default is not applied on a bare addNode), and in JCR-SQL2 a comparison
+    // against a missing property is unknown rather than true -- so "state <> 'finished'" alone
+    // would silently drop those rows from the open group and from the board with them.
+    private static final String OPEN_GROUP_CONDITION =
+            "(task.state is null or task.state <> '" + CLOSED_STATE + "')";
+
+    private static final String CLOSED_GROUP_CONDITION = "task.state = '" + CLOSED_STATE + "'";
 
     @GraphQLField
     @GraphQLConnection(connectionFetcher = DXPaginatedDataConnectionFetcher.class)
@@ -267,6 +287,10 @@ public final class TaskBoardQueryExtensions {
         // a cursor -- the cursor's own row, which is dropped again below.
         int fetchCount = pageSize + 1 + (cursorIdentifier != null ? 1 : 0);
         List<GqlTaskBoard> rows = executePage(session, plan, firstRow, fetchCount, context);
+        if (rows == null) {
+            // Could not place the closed group behind the open one -- see executePage.
+            return null;
+        }
 
         if (cursorIdentifier != null) {
             if (rows.isEmpty() || !cursorIdentifier.equals(rows.get(0).getId())) {
@@ -301,10 +325,56 @@ public final class TaskBoardQueryExtensions {
         return new TaskBoardPage(rows, startOffset, totalCount, startOffset > 0, hasNextPage);
     }
 
+    /**
+     * One window of the board, taken across the open group and then the closed one, or null when
+     * the two cannot be joined up confidently (see below) and the scanning path should serve it
+     * instead.
+     *
+     * <p>The board is the concatenation of two independently ordered queries, so a window that
+     * reaches past the end of the open group has to continue into the closed one at the right
+     * place. Which place that is falls out of what the first query returned, and usually costs no
+     * extra query at all:
+     *
+     * <ul>
+     *   <li>a full window -- the open group covers it, and the closed one is not touched;</li>
+     *   <li>a short but non-empty window -- the open group ended inside it, so the closed group
+     *       starts at its own row 0;</li>
+     *   <li>an empty window -- the open group ended somewhere BEFORE this offset, and nothing in
+     *       the result says where, so that one case counts it.</li>
+     * </ul>
+     */
     private static List<GqlTaskBoard> executePage(JCRSessionWrapper session, QueryPlan plan, int offset,
             int limit, TaskBoardRequestContext context) throws RepositoryException {
         long startedAt = System.nanoTime();
-        QueryWrapper query = plan.createOrderedQuery(session);
+        List<GqlTaskBoard> rows = executeGroup(session, plan, false, offset, limit, context);
+        int fromOpen = rows.size();
+
+        if (fromOpen < limit) {
+            int closedOffset;
+            if (rows.isEmpty()) {
+                int openTotal = countGroup(session, plan, false);
+                if (openTotal < 0) {
+                    // getSize() is allowed to say "I don't know", and without it the closed
+                    // group's offset is a guess. Hand the request to the path that counts by hand.
+                    return null;
+                }
+                closedOffset = Math.max(0, offset - openTotal);
+            } else {
+                closedOffset = 0;
+            }
+            rows.addAll(executeGroup(session, plan, true, closedOffset, limit - fromOpen, context));
+        }
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("taskBoard sliced page: offset={} limit={} materialized={} rows ({} open, {} closed) in {} ms",
+                    offset, limit, rows.size(), fromOpen, rows.size() - fromOpen, elapsedMs(startedAt));
+        }
+        return rows;
+    }
+
+    private static List<GqlTaskBoard> executeGroup(JCRSessionWrapper session, QueryPlan plan, boolean closed,
+            int offset, int limit, TaskBoardRequestContext context) throws RepositoryException {
+        QueryWrapper query = plan.createGroupQuery(session, closed);
         query.setOffset(offset);
         query.setLimit(limit);
         JCRNodeIteratorWrapper nodes = query.execute().getNodes();
@@ -312,11 +382,17 @@ public final class TaskBoardQueryExtensions {
         while (nodes.hasNext()) {
             rows.add(new GqlTaskBoard((JCRNodeWrapper) nodes.next(), context));
         }
-        if (logger.isDebugEnabled()) {
-            logger.debug("taskBoard sliced page: offset={} limit={} materialized={} rows in {} ms",
-                    offset, limit, rows.size(), elapsedMs(startedAt));
-        }
         return rows;
+    }
+
+    /** How many rows one of the two groups holds, or -1 when the iterator will not say. */
+    private static int countGroup(JCRSessionWrapper session, QueryPlan plan, boolean closed)
+            throws RepositoryException {
+        long size = plan.createGroupCountQuery(session, closed).execute().getNodes().getSize();
+        if (size < 0) {
+            return -1;
+        }
+        return size > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) size;
     }
 
     /**
@@ -358,25 +434,20 @@ public final class TaskBoardQueryExtensions {
         // compute for display, after the JCR query, rather than against the raw stored properties.
         stream = applySearch(stream, search);
 
-        if (RESOLVED_VALUE_SORT_FIELDS.contains(sortBy)) {
-            // Comparator.comparing(valueOf, ...) would call valueOf on every pairwise comparison
-            // during the sort (O(n log n) calls) -- for "owner" that's a repeated JCR node lookup
-            // (getAssigneeDisplayName) per comparison for the same n values. Computing each
-            // element's sort key once up front (a Schwartzian transform) makes the extractor run
-            // exactly once per row instead.
-            Function<GqlTaskBoard, String> valueOf = resolvedValueExtractor(sortBy);
-            Comparator<String> keyComparator = resolvedValueComparator(plan.ascending);
-            stream = stream.map(task -> new AbstractMap.SimpleEntry<>(valueOf.apply(task), task))
-                    .sorted(Comparator.comparing(Map.Entry::getKey, keyComparator))
-                    .map(Map.Entry::getValue);
-        }
+        // Materialized here, and the ordering applied to the list rather than to the stream. An
+        // ordering that compares rows cannot be lazy anyway, and this path always has one to
+        // apply now: closed tasks sort last even when the caller's own sort was left to JCR.
+        // List.sort is also specified to be STABLE, which the group ordering relies on -- within
+        // each group the rows have to keep exactly the order they already had, and a stream's
+        // sorted() makes no such promise for a source that does not report itself as ordered
+        // (which a JCR node iterator's spliterator does not).
+        List<GqlTaskBoard> rows = stream.collect(Collectors.toList());
+        rows.sort(boardOrdering(rows, plan, sortBy));
 
         if (logger.isDebugEnabled()) {
-            // Logged before the stream is consumed: this path is lazy, so what is measured here
-            // is only the JCR query itself -- the per-row cost lands on core's paginate() below.
-            logger.debug("taskBoard full scan (search={}, resolved-value sort={}): query executed in {} ms",
+            logger.debug("taskBoard full scan (search={}, resolved-value sort={}): {} rows in {} ms",
                     search != null && !search.trim().isEmpty(), RESOLVED_VALUE_SORT_FIELDS.contains(sortBy),
-                    elapsedMs(startedAt));
+                    rows.size(), elapsedMs(startedAt));
         }
 
         // Core is given, and matches on, bare identifier cursors -- the format this query has
@@ -384,7 +455,7 @@ public final class TaskBoardQueryExtensions {
         // wrapper only re-publishes each cursor with the row's index attached, so that a client
         // coming off this path can go back to the sliced one on its next page.
         DXPaginatedData<GqlTaskBoard> page = TaskBoardPage.withIndexedCursors(PaginationHelper.paginate(
-                stream, task -> TaskBoardPage.encodeCursor(task.getId()), arguments));
+                rows.stream(), task -> TaskBoardPage.encodeCursor(task.getId()), arguments));
         if (logger.isDebugEnabled()) {
             // getTotalCount() is what drains the rest of the stream, so this line reports the real
             // cost of the scan -- and, on debug only, forces that drain even for a caller that
@@ -411,6 +482,37 @@ public final class TaskBoardQueryExtensions {
 
     private static boolean containsIgnoreCase(String value, String lowercaseNeedle) {
         return value != null && value.toLowerCase().contains(lowercaseNeedle);
+    }
+
+    /** Whether a task belongs to the board's closed group, which always sorts after the open one. */
+    private static boolean isClosed(GqlTaskBoard task) {
+        return CLOSED_STATE.equals(task.getState());
+    }
+
+    /**
+     * The order the scanning path puts its rows in: the closed group after the open one, and the
+     * caller's own ordering inside each.
+     *
+     * <p>When the caller sorted on one of the board's resolved columns, that ordering is the
+     * second term here. Its keys are computed ONCE per row into a map first, not inside the
+     * comparator: {@code Comparator.comparing(valueOf, ...)} would call the extractor on every
+     * pairwise comparison, O(n log n) times, and for "owner" the extractor is a JCR node lookup
+     * (getAssigneeDisplayName) -- so the same n values would be resolved over and over.
+     *
+     * <p>When the caller sorted on a raw date property, JCR already ordered the rows and there is
+     * no second term: the group sort is stable, so that order survives inside each group.
+     */
+    private static Comparator<GqlTaskBoard> boardOrdering(List<GqlTaskBoard> rows, QueryPlan plan, String sortBy) {
+        Comparator<GqlTaskBoard> ordering = Comparator.comparing(TaskBoardQueryExtensions::isClosed);
+        if (!RESOLVED_VALUE_SORT_FIELDS.contains(sortBy)) {
+            return ordering;
+        }
+        Function<GqlTaskBoard, String> valueOf = resolvedValueExtractor(sortBy);
+        Map<String, String> sortKeys = new HashMap<>();
+        for (GqlTaskBoard task : rows) {
+            sortKeys.put(task.getId(), valueOf.apply(task));
+        }
+        return ordering.thenComparing(task -> sortKeys.get(task.getId()), resolvedValueComparator(plan.ascending));
     }
 
     private static Function<GqlTaskBoard, String> resolvedValueExtractor(String sortBy) {
@@ -466,6 +568,23 @@ public final class TaskBoardQueryExtensions {
 
         QueryWrapper createOrderedQuery(JCRSessionWrapper session) throws RepositoryException {
             return create(session, selection + orderBy);
+        }
+
+        /**
+         * One of the board's two groups, ordered. The WHERE clause and the bind values are the
+         * board's own; only the group condition and nothing else is added, so the two groups
+         * together are exactly the rows {@link #createOrderedQuery} would have returned.
+         */
+        QueryWrapper createGroupQuery(JCRSessionWrapper session, boolean closed) throws RepositoryException {
+            return create(session, selection + groupCondition(closed) + orderBy);
+        }
+
+        QueryWrapper createGroupCountQuery(JCRSessionWrapper session, boolean closed) throws RepositoryException {
+            return create(session, selection + groupCondition(closed));
+        }
+
+        private static String groupCondition(boolean closed) {
+            return " and " + (closed ? CLOSED_GROUP_CONDITION : OPEN_GROUP_CONDITION);
         }
 
         QueryWrapper createCountQuery(JCRSessionWrapper session) throws RepositoryException {

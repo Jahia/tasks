@@ -109,6 +109,46 @@
     gap: var(--spacing-small);
 }
 
+/*
+ * A closed task, which stays on the board (below every live one) as a record of what was done.
+ *
+ * It reads as a record rather than as work: the border goes, so the card sits IN the page instead
+ * of on it, the ground turns a faint grey, every piece of text mutes to one colour, and the title
+ * is struck through - the one signal that needs no legend. Nothing is hidden and nothing moves,
+ * so a closed card still lines up with the ones above it and can still be read.
+ *
+ * Every rule below is two classes deep, which is what lets it win against Moonstone's own
+ * single-class Typography colours without reaching for !important.
+ */
+.task-board__card--closed {
+    border-color: transparent;
+    background-color: var(--color-gray_light40, #dadada66);
+}
+
+.task-board__card--closed .task-board__title,
+.task-board__card--closed .task-board__meta,
+.task-board__card--closed .task-board__summary,
+.task-board__card--closed .task-board__targets,
+/* The target's type, which has a colour of its own on a live card (further down) and would
+   otherwise keep it here - a directly-set colour beats an inherited one however faint. */
+.task-board__card--closed .task-board__target > span:nth-child(2) {
+    color: var(--color-gray, #7a7f88);
+}
+
+.task-board__card--closed .task-board__title {
+    text-decoration: line-through;
+}
+
+/*
+ * The due date loses its colour and its weight here. On a live card those say "act on this today";
+ * on a closed one the date is a fact about work already done, and a red "Due 27 September" under a
+ * finished task would be telling the reader to hurry up about something that is over.
+ */
+.task-board__card--closed .task-board__due {
+    color: var(--color-gray, #7a7f88);
+    font-weight: normal;
+}
+
 /* The linked target page's own title, shown beside the task title -- distinct from the rest of
    the card's plain text, since it's the one piece of this header that's actually clickable. */
 .task-board__target-link {

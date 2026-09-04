@@ -8,12 +8,14 @@ import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayou
 import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
+    BOARD_STATES,
+    CLOSED_STATE,
+    CLOSED_STATE_LABEL,
     COMPLETE_TASK_MUTATION,
     DEFAULT_SCOPE,
     DEFAULT_SORT_BY,
     DEFAULT_SORT_ORDER,
     EMPTY_SCOPE_MESSAGE,
-    NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
     SUSPEND_TASK_MUTATION,
     TASK_BOARD_QUERY,
@@ -62,8 +64,16 @@ const STATE_CHIP_COLOR: Record<string, ChipColor> = {
     active: 'accent',
     started: 'warning',
     suspended: 'light',
-    finished: 'success'
+    // Deliberately not 'success': a closed task sits at the bottom of the board among other closed
+    // ones, and a green badge on every one of them would pull the eye away from the live work
+    // above. The label carries the meaning; the colour only has to stay out of the way.
+    finished: 'light'
 };
+
+// What a state is called on the card. Only one state needs an entry -- see CLOSED_STATE_LABEL.
+function stateLabel(state: string | null): string {
+    return state === CLOSED_STATE ? CLOSED_STATE_LABEL : capitalize(state);
+}
 
 // One button per outcome the task actually declares (workflow-specific --
 // see TaskBoardMutationExtensions#completeTask). Common synonyms get the
@@ -256,6 +266,14 @@ type TaskActionsProps = {
 // wrong guess here just surfaces as an error banner.
 function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
     const canAct = task.owner === currentUserKey || canReviewAll;
+    // Closed is the end of the line: nothing can be started, refused, unassigned or closed again,
+    // and none of the state branches below match it. Returning early states that outright rather
+    // than leaving it to fall through them, so a branch added later cannot accidentally offer an
+    // action on a task that is done.
+    if (task.state === CLOSED_STATE) {
+        return null;
+    }
+
     const targetUrl = task.targetNode?.url;
     // Three phases, not two: Unassigned (active, no owner) -> Assigned (active, owned, not yet
     // started) -> Active/In-Progress (started). assignTaskToMe deliberately leaves state
@@ -394,9 +412,13 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
     // available for a jnt:workflowTask whose process is still live; a plain jnt:task, or one
     // whose summary couldn't be resolved, falls back to its own free-text description instead.
     const summaryLine = task.workflowSummary ?? descriptionWithoutPaths(task.description);
+    // A closed task is a record of work rather than work, and the card says so before anything on
+    // it is read: recessed, muted, its title struck through. See the --closed rules in the
+    // stylesheet - all of it is styling, so nothing here has to be hidden or rearranged.
+    const isClosed = task.state === CLOSED_STATE;
 
     return (
-        <div className="task-board__card">
+        <div className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}`}>
             {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
                 nobody owns a task, and the property behind it is the assignee. */}
             <Typography component="p" variant="caption" weight="light" className="task-board__meta">
@@ -406,12 +428,12 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                 ].join(' · ')}
             </Typography>
             <div className="task-board__card-header">
-                <Typography component="span" weight="semiBold" variant="body">
+                <Typography component="span" weight="semiBold" variant="body" className="task-board__title">
                     {task.title ?? 'Untitled task'}
                 </Typography>
                 {/* Beside the title, not on its own line: the state is what decides whether a
                     row is worth opening at all, so it reads with the name it belongs to. */}
-                <Chip label={capitalize(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
+                <Chip label={stateLabel(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
                 {targetTitle && task.targetNode?.url && (
                     <a
                         className="task-board__target-link"
@@ -527,7 +549,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                 search: search === '' ? null : search,
                 sortBy,
                 sortOrder,
-                filterState: NOT_FINISHED_STATES,
+                filterState: BOARD_STATES,
                 scope
             });
             setConnection(data.taskBoard);

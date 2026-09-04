@@ -8,12 +8,18 @@
  * both sides.
  */
 
-// The board's own default scope: everything except finished tasks, so completed work doesn't
-// pile up in the list forever. Passed as an explicit filterState value (an existing but,
-// until now, never-actually-called server arg -- see TaskBoardQueryExtensions#taskBoard) rather
-// than baked into the server as a hidden default, so the taskBoard query itself stays a
-// complete, neutral listing endpoint -- every call site here just opts into this narrower view.
-export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
+// The states the board lists. Closed ("finished") tasks are included: somebody needs to see that
+// the work was done, and which of it. They cannot bury the live work, because the server sorts the
+// closed ones into a group of their own that always follows the open ones, whatever the caller
+// sorted by -- see TaskBoardQueryExtensions' CLOSED_STATE.
+//
+// "cancelled" is the state left out. It exists in the node type's choicelist and nothing in this UI
+// ever writes it, so listing it would only ever show something this board did not put there.
+//
+// Passed as an explicit filterState value (an existing but, until now, never-actually-called server
+// arg -- see TaskBoardQueryExtensions#taskBoard) rather than baked into the server as a hidden
+// default, so the taskBoard query itself stays a complete, neutral listing endpoint.
+export const BOARD_STATES = ['active', 'started', 'suspended', 'finished'];
 
 // The board's own default sort -- a concrete starting field/direction rather than "no sort at
 // all", so a sort-by control always has a real selected value to display (and so the very first
@@ -47,6 +53,13 @@ export const TASK_SCOPES: Array<{label: string; value: TaskScope}> = [
 
 export const DEFAULT_SCOPE: TaskScope = 'assignedToMe';
 
+// The one state whose stored name is not the word to show. "Close" is what the button says, so
+// "Closed" is what the task has to read as afterwards -- "Finished" would be a second name for
+// the same thing, and the reader has no way to know they are the same. Every other state is shown
+// capitalised as stored (see TaskCard).
+export const CLOSED_STATE = 'finished';
+export const CLOSED_STATE_LABEL = 'Closed';
+
 // What an empty board means, which depends entirely on which list is showing.
 export const EMPTY_SCOPE_MESSAGE: Record<TaskScope, string> = {
     assignedToMe: 'No task is assigned to you.',
@@ -67,7 +80,7 @@ export const EMPTY_SCOPE_MESSAGE: Record<TaskScope, string> = {
  */
 export const initialBoardVariables = (pageSize: number) => ({
     first: pageSize,
-    filterState: NOT_FINISHED_STATES,
+    filterState: BOARD_STATES,
     sortBy: DEFAULT_SORT_BY,
     sortOrder: DEFAULT_SORT_ORDER,
     scope: DEFAULT_SCOPE
