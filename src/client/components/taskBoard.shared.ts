@@ -18,7 +18,12 @@ export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
 // The board's own default sort -- a concrete starting field/direction rather than "no sort at
 // all", so a sort-by control always has a real selected value to display (and so the very first
 // render already matches whatever that control shows, before any interaction re-fetches anything).
-export const DEFAULT_SORT_BY = 'title';
+//
+// Oldest created first, so the task that has been waiting longest is the one at the top. This is
+// also the cheaper path server-side: jcr:created is a raw JCR property, which
+// TaskBoardQueryExtensions cuts by the query itself, where the board's own resolved columns
+// (title/creator/owner/state) have to be sorted in memory.
+export const DEFAULT_SORT_BY = 'jcr:created';
 export const DEFAULT_SORT_ORDER = 'ascending';
 
 export const TASK_BOARD_QUERY = /* GraphQL */ `
@@ -35,6 +40,7 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     title
                     creator
                     createdDate
+                    dueDate
                     owner
                     assigneeDisplayName
                     state
@@ -72,6 +78,7 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     title
                     creator
                     createdDate
+                    dueDate
                     owner
                     assigneeDisplayName
                     state
@@ -139,6 +146,7 @@ export type TaskBoardNode = {
     title: string | null;
     creator: string | null;
     createdDate: string | null;
+    dueDate: string | null;
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;

@@ -28,13 +28,20 @@ const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
 // filter over an already-fully-loaded list.
 const SEARCH_DEBOUNCE_MS = 350;
 
-type SortField = 'title' | 'creator' | 'owner' | 'state';
+// 'jcr:created' is a raw JCR property rather than one of the board's resolved columns, and the
+// server treats the two differently - see TaskBoardQueryExtensions#taskBoard, which sorts a raw
+// property in the query and the resolved columns in memory. It is in the same list because to a
+// reader they are all just "sort by".
+type SortField = 'jcr:created' | 'title' | 'creator' | 'owner' | 'state';
 type SortDirection = 'ascending' | 'descending';
 
 const SORT_OPTIONS: Array<{label: string; value: SortField}> = [
+    {label: 'Creation date', value: 'jcr:created'},
     {label: 'Task Name', value: 'title'},
-    {label: 'Creator', value: 'creator'},
-    {label: 'Owner', value: 'owner'},
+    {label: 'Created by', value: 'creator'},
+    // The server field is still called "owner" -- it sorts on the assignee - but nobody owns a
+    // task, so the control says what it does.
+    {label: 'Assigned to', value: 'owner'},
     {label: 'State', value: 'state'}
 ];
 
@@ -79,6 +86,47 @@ function outcomeLabel(outcome: string): string {
 // formatCreatedDate avoids allocating two new Intl.DateTimeFormat instances on every render.
 const CREATED_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'});
 const CREATED_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true});
+
+/**
+ * How urgent a due date is, as one of three states the card colours.
+ *
+ * Late is anything in the past; soon is inside a week. Everything further out is "ok", which
+ * covers both "more than a month" and the fortnight in between - the brief named only those
+ * three, and a fourth colour for 8-30 days would say something nobody asked to distinguish.
+ *
+ * A month is taken as 30 days deliberately: this is a colour, not an anniversary, and a
+ * calendar-accurate month would make the boundary move with the month the reader happens to be in.
+ */
+type DueTone = 'late' | 'soon' | 'ok';
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function dueTone(iso: string | null, now: number = Date.now()): DueTone | null {
+    if (!iso) {
+        return null;
+    }
+
+    const due = new Date(iso).getTime();
+    if (Number.isNaN(due)) {
+        return null;
+    }
+
+    if (due < now) {
+        return 'late';
+    }
+
+    return due - now < WEEK_MS ? 'soon' : 'ok';
+}
+
+/** The due date as a day, with no time of day: a due date is a deadline, not an appointment. */
+function formatDueDate(iso: string | null): string | null {
+    if (!iso) {
+        return null;
+    }
+
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? null : CREATED_DATE_FORMAT.format(date);
+}
 
 function formatCreatedDate(iso: string | null): string | null {
     if (!iso) {
@@ -207,6 +255,8 @@ type TaskCardProps = {
 function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
+    const dueLabel = formatDueDate(task.dueDate);
+    const tone = dueTone(task.dueDate);
     // The workflow-engine-derived summary (TaskBoardQueryExtensions#getWorkflowSummary) is only
     // available for a jnt:workflowTask whose process is still live; a plain jnt:task, or one
     // whose summary couldn't be resolved, falls back to its own free-text description instead.
@@ -218,6 +268,9 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                 <Typography component="span" weight="semiBold" variant="body">
                     {task.title ?? 'Untitled task'}
                 </Typography>
+                {/* Beside the title rather than down with the metadata: the state is what decides
+                    whether a row is worth opening at all, so it reads with the name. */}
+                <Chip label={capitalize(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
                 {targetTitle && task.targetNode?.url && (
                     <a
                         className="task-board__target-link"
@@ -229,9 +282,22 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                     </a>
                 )}
             </div>
-            {createdDate && (
-                <Typography component="p" variant="caption" weight="light" className="task-board__meta">
-                    {`Created by: ${task.creator ?? 'Unknown'}, on ${createdDate}`}
+            {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
+                nobody owns a task, and the property behind it is the assignee. */}
+            <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                {[
+                    `Created by: ${task.creator ?? 'Unknown'}${createdDate ? `, on ${createdDate}` : ''}`,
+                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`
+                ].join(' · ')}
+            </Typography>
+            {dueLabel && tone && (
+                <Typography
+                    component="p"
+                    variant="caption"
+                    className={`task-board__due task-board__due--${tone}`}
+                    data-sel-due-tone={tone}
+                >
+                    {tone === 'late' ? `Overdue since ${dueLabel}` : `Due ${dueLabel}`}
                 </Typography>
             )}
             {summaryLine && (
@@ -239,11 +305,6 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                     {summaryLine}
                 </Typography>
             )}
-            <div className="task-board__badges">
-                <Typography variant="caption" weight="light">{`Creator: ${task.creator ?? '—'}`}</Typography>
-                <Typography variant="caption" weight="light">{`Owner: ${task.assigneeDisplayName ?? 'Unassigned'}`}</Typography>
-                <Chip label={capitalize(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
-            </div>
             <TaskActions
                 task={task}
                 currentUserKey={currentUserKey}

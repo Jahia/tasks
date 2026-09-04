@@ -83,15 +83,34 @@
 }
 
 .task-board__meta,
+.task-board__due,
 .task-board__summary {
     margin: 0;
 }
 
-.task-board__badges {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--spacing-medium);
+/*
+ * The due date, coloured by how close it is: blue while there is time, orange inside a week, red
+ * once it has passed. Semi-bold rather than light like the line above it, because this is the one
+ * piece of card metadata that can demand action today.
+ *
+ * Moonstone's own semantic tokens, with a literal fallback each: these three colours mean
+ * "fine / soon / late" and should move with the theme rather than being picked here. The `--danger`
+ * and `--warning` families are the same ones the state chips draw from.
+ */
+.task-board__due {
+    font-weight: 600;
+}
+
+.task-board__due--ok {
+    color: var(--color-accent_dark, #00a0e3);
+}
+
+.task-board__due--soon {
+    color: var(--color-warning_dark, #b26a00);
+}
+
+.task-board__due--late {
+    color: var(--color-danger_dark, #c1272d);
 }
 
 .task-board__actions {
