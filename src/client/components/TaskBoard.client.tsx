@@ -483,10 +483,20 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
     // it is read: recessed, muted, its title struck through. See the --closed rules in the
     // stylesheet - all of it is styling, so nothing here has to be hidden or rearranged.
     const isClosed = task.state === CLOSED_STATE;
+    // A deadline is not a footnote on the card, it is the reason to pick this card over the one
+    // below it, so the whole card carries it: warm and outlined once the date is inside a week,
+    // red and lifted off the page once it has passed. Only those two - a date a month out is
+    // information, not a call to act, and highlighting it would leave nothing left to escalate to.
+    //
+    // Never on a closed card. Its due date is already neutralised (see the --closed rules), for
+    // the same reason: hurrying somebody about work that is finished is noise, and dressing the
+    // card up as urgent would be the loudest possible version of it.
+    const dueHighlight = !isClosed && (tone === 'soon' || tone === 'late') ? ` task-board__card--due-${tone}` : '';
 
     return (
         <div
-            className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}${canDrag ? ' task-board__card--draggable' : ''}`}
+            className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}${dueHighlight}${canDrag ? ' task-board__card--draggable' : ''}`}
+            data-sel-due-highlight={tone ?? 'none'}
             draggable={canDrag}
             onDragStart={event => {
                 // Firefox will not begin a drag with an empty dataTransfer, and the task's own id

@@ -177,6 +177,34 @@
     background-color: var(--color-white);
 }
 
+/*
+ * A card with a deadline worth acting on, in two steps.
+ *
+ * The stripe down the left edge is an INSET SHADOW rather than a thicker left border: a border
+ * that grows from 1px to 4px moves everything on the card 3px right, so a column of cards would
+ * no longer line up as one object the moment one of them came due.
+ *
+ * Both grounds are the "_plain" variants, which are opaque. The translucent 20% ones would let
+ * the column's own grey through and come out muddier in the Active column than in the Started
+ * one, for the same deadline.
+ */
+.task-board__card--due-soon {
+    border-color: var(--color-warning, #fb0);
+    background-color: var(--color-warning_plain20, #fff1cc);
+    box-shadow: inset 4px 0 0 var(--color-warning, #fb0);
+}
+
+/* Past due: the same idea turned up. Stronger tint, red rather than amber, a wider stripe, and
+   the one drop shadow anywhere on this board - it lifts the card off the column, which is the
+   difference between "look at this soon" and "this one is already late". */
+.task-board__card--due-late {
+    border-color: var(--color-danger, #f44053);
+    background-color: var(--color-danger_plain20, #fbd7db);
+    box-shadow:
+        inset 5px 0 0 var(--color-danger, #f44053),
+        0 2px 6px var(--color-danger40, #f4405366);
+}
+
 .task-board__card-header {
     display: flex;
     align-items: baseline;
@@ -198,6 +226,10 @@
 .task-board__card--closed {
     border-color: transparent;
     background-color: var(--color-gray_light40, #dadada66);
+    /* Closed beats due, and says so here as well as in TaskCard's own guard: a closed card must
+       never keep a deadline stripe, and a rule that only wins by source order is one edit away
+       from not winning. */
+    box-shadow: none;
 }
 
 .task-board__card--closed .task-board__title,
