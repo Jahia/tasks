@@ -394,12 +394,20 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
 
     return (
         <div className="task-board__card">
+            {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
+                nobody owns a task, and the property behind it is the assignee. */}
+            <Typography component="p" variant="caption" weight="light" className="task-board__meta">
+                {[
+                    `Created by: ${task.creator ?? 'Unknown'}${createdDate ? `, on ${createdDate}` : ''}`,
+                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`
+                ].join(' · ')}
+            </Typography>
             <div className="task-board__card-header">
                 <Typography component="span" weight="semiBold" variant="body">
                     {task.title ?? 'Untitled task'}
                 </Typography>
-                {/* Beside the title rather than down with the metadata: the state is what decides
-                    whether a row is worth opening at all, so it reads with the name. */}
+                {/* Beside the title, not on its own line: the state is what decides whether a
+                    row is worth opening at all, so it reads with the name it belongs to. */}
                 <Chip label={capitalize(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
                 {targetTitle && task.targetNode?.url && (
                     <a
@@ -412,14 +420,6 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                     </a>
                 )}
             </div>
-            {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
-                nobody owns a task, and the property behind it is the assignee. */}
-            <Typography component="p" variant="caption" weight="light" className="task-board__meta">
-                {[
-                    `Created by: ${task.creator ?? 'Unknown'}${createdDate ? `, on ${createdDate}` : ''}`,
-                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`
-                ].join(' · ')}
-            </Typography>
             {dueLabel && tone && (
                 <Typography
                     component="p"
