@@ -113,6 +113,40 @@
     color: var(--color-danger_dark, #c1272d);
 }
 
+/*
+ * What the task is about: one row per referenced node, each naming the content and its type with a
+ * button that lands on it. A list rather than a paragraph because it is a list - most tasks raised
+ * from the Content Types accordion point at several records.
+ */
+.task-board__targets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-nano);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.task-board__target {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    /* Enough to separate the name from its type without them reading as one phrase. */
+    gap: var(--spacing-small);
+    min-width: 0;
+}
+
+/* The type, second in the row: present for identification, not competing with the name. */
+.task-board__target > span:nth-child(2) {
+    color: var(--color-gray_dark);
+}
+
+/* The button sits at the end of the row rather than beside the name, so a column of them lines up
+   however long the names are. */
+.task-board__target > button {
+    margin-left: auto;
+}
+
 .task-board__actions {
     display: flex;
     flex-direction: column;

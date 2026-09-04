@@ -49,6 +49,13 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     workflowSummary
                     viewerRole
                     candidateDisplayNames
+                    targets {
+                        uuid
+                        displayName
+                        typeName
+                        inPage
+                        locationPath
+                    }
                     targetNode {
                         url
                         property(name: "jcr:title") {
@@ -87,6 +94,13 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     workflowSummary
                     viewerRole
                     candidateDisplayNames
+                    targets {
+                        uuid
+                        displayName
+                        typeName
+                        inPage
+                        locationPath
+                    }
                     targetNode {
                         url
                         property(name: "jcr:title") {
@@ -141,6 +155,16 @@ export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
+export type TaskTarget = {
+    uuid: string;
+    displayName: string;
+    typeName: string;
+    // Whether the content sits inside a page, which decides where its button goes: jContent listing
+    // the page that holds it, or jContent listing the folder that holds it.
+    inPage: boolean;
+    locationPath: string;
+};
+
 export type TaskBoardNode = {
     id: string;
     title: string | null;
@@ -158,6 +182,9 @@ export type TaskBoardNode = {
     // added later doesn't turn into a type error here before anything consumes it.
     viewerRole: string;
     candidateDisplayNames: string[];
+    // Every node the task references, named rather than pathed - see GqlTaskTarget. `targetNode`
+    // stays for the preview link: it resolves to a page, which is the only thing with a URL.
+    targets: TaskTarget[];
     targetNode: {url: string; property: {value: string} | null} | null;
 };
 

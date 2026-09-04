@@ -17,7 +17,7 @@ import {
     TASK_BOARD_QUERY,
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
-import type {TaskBoardConnection, TaskBoardNode} from './taskBoard.shared';
+import type {TaskBoardConnection, TaskBoardNode, TaskTarget} from './taskBoard.shared';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
@@ -86,6 +86,98 @@ function outcomeLabel(outcome: string): string {
 // formatCreatedDate avoids allocating two new Intl.DateTimeFormat instances on every render.
 const CREATED_DATE_FORMAT = new Intl.DateTimeFormat('en-US', {year: 'numeric', month: 'long', day: 'numeric'});
 const CREATED_TIME_FORMAT = new Intl.DateTimeFormat('en-US', {hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true});
+
+/**
+ * The description as the person typed it, without the paths appended after it.
+ *
+ * The content-types module writes the selected records' JCR paths into the description itself
+ * (taskDescription() joins the body and the paths with a blank line), because the board used to
+ * show nothing else about what a task was for. It shows the targets properly now, so those lines
+ * are the same information twice - in its least readable form.
+ *
+ * Trailing lines that begin with "/" are dropped rather than everything after the first blank
+ * line: a description can legitimately have paragraphs, and only a path starts that way. A task
+ * whose description was ONLY paths ends up with no description line at all, which is right.
+ */
+function descriptionWithoutPaths(text: string | null): string | null {
+    if (!text) {
+        return null;
+    }
+
+    const lines = text.split('\n');
+    while (lines.length > 0) {
+        const last = lines[lines.length - 1].trim();
+        if (last === '' || last.startsWith('/')) {
+            lines.pop();
+        } else {
+            break;
+        }
+    }
+
+    const kept = lines.join('\n').trim();
+    return kept === '' ? null : kept;
+}
+
+/**
+ * The language segment a jContent URL carries.
+ *
+ * The board is a dashboard screen with no site or language of its own, and a task may point at
+ * content on any site, so there is nothing to inherit from. It borrows the app shell's own
+ * language from contextJsParameters - the same object jContent reads its defaults from - and falls
+ * back to English, which is what a missing language segment would resolve to anyway.
+ */
+function jcontentLanguage(): string {
+    const shell = globalThis as unknown as {contextJsParameters?: {lang?: string; uilang?: string}};
+    return shell.contextJsParameters?.lang ?? shell.contextJsParameters?.uilang ?? 'en';
+}
+
+/**
+ * Where the button sends somebody, as a jContent location.
+ *
+ * <p>Content in a page opens the pages accordion on the page that holds it; content in a folder
+ * opens the content-folders accordion on the folder that holds it. Either way jContent lists the
+ * location's children, so the content is in front of the reader with its own actions on the row.
+ *
+ * Not Content Editor, though that is the obvious destination for a standalone item: the editor is
+ * reached through a React context that only jContent's own tree provides (its exported
+ * ContentEditorApiContextProvider supplies an empty object), and no URL opens it. From the
+ * dashboard, landing on the item is as close as this can get.
+ *
+ * The site comes out of the path rather than from context, because the board is a dashboard screen
+ * with no site of its own and a task may point anywhere.
+ */
+function locationUrl(target: TaskTarget, language: string): {url: string; site: string; mode: string} | null {
+    const match = /^\/sites\/([^/]+)(\/.*)?$/.exec(target.locationPath);
+    if (!match) {
+        return null;
+    }
+
+    const [, site, rest] = match;
+    const mode = target.inPage ? 'pages' : 'content-folders';
+    return {site, mode, url: `/jahia/jcontent/${site}/${language}/${mode}${rest ?? ''}`};
+}
+
+/**
+ * Asks jContent to open in its list view before sending somebody there.
+ *
+ * The view mode is not in the URL: jContent reads it out of localStorage as it parses the address
+ * (`jcontent-previous-tableView-viewMode-<site>-<mode>`, JContent.redux.js), falling back to the
+ * accordion's own default. The pages accordion defaults to the page builder, which renders the page
+ * rather than listing what is in it - so a component target landed somewhere the content could not
+ * be picked out at all.
+ *
+ * The cost is that this becomes the reader's remembered mode for that accordion, the same as if
+ * they had switched to List themselves. Landing them where the content is visible is worth it, and
+ * the switcher is right there to change back.
+ */
+function preferListView(site: string, mode: string): void {
+    try {
+        window.localStorage.setItem(`jcontent-previous-tableView-viewMode-${site}-${mode}`, 'flatList');
+    } catch {
+        // A private window or a full quota. The navigation still happens; it just arrives in
+        // whatever view jContent already preferred.
+    }
+}
 
 /**
  * How urgent a due date is, as one of three states the card colours.
@@ -255,12 +347,13 @@ type TaskCardProps = {
 function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
+    const language = jcontentLanguage();
     const dueLabel = formatDueDate(task.dueDate);
     const tone = dueTone(task.dueDate);
     // The workflow-engine-derived summary (TaskBoardQueryExtensions#getWorkflowSummary) is only
     // available for a jnt:workflowTask whose process is still live; a plain jnt:task, or one
     // whose summary couldn't be resolved, falls back to its own free-text description instead.
-    const summaryLine = task.workflowSummary ?? task.description;
+    const summaryLine = task.workflowSummary ?? descriptionWithoutPaths(task.description);
 
     return (
         <div className="task-board__card">
@@ -304,6 +397,39 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
                 <Typography component="p" variant="body" className="task-board__summary">
                     {summaryLine}
                 </Typography>
+            )}
+            {/* What the task is about, named rather than pathed. One row per referenced node:
+                targetNode is multi-valued and most tasks raised from the Content Types accordion
+                point at several records. */}
+            {task.targets.length > 0 && (
+                <ul className="task-board__targets">
+                    {task.targets.map(target => {
+                        const location = locationUrl(target, language);
+                        return (
+                            <li key={target.uuid} className="task-board__target">
+                                <Typography component="span" weight="semiBold" variant="body">
+                                    {target.displayName}
+                                </Typography>
+                                <Typography component="span" variant="caption" weight="light">
+                                    {target.typeName}
+                                </Typography>
+                                {location && (
+                                    <Button
+                                        size="default"
+                                        variant="outlined"
+                                        label="Edit"
+                                        data-sel-role="target-edit"
+                                        data-sel-target-in-page={String(target.inPage)}
+                                        onClick={() => {
+                                            preferListView(location.site, location.mode);
+                                            window.location.assign(location.url);
+                                        }}
+                                    />
+                                )}
+                            </li>
+                        );
+                    })}
+                </ul>
             )}
             <TaskActions
                 task={task}

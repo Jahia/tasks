@@ -375,6 +375,41 @@ public class GqlTaskBoard {
         }
     }
 
+    /**
+     * Every piece of content the task references, named rather than pathed.
+     *
+     * <p>targetNode is multi-valued and commonly holds more than one: three of the five tasks on
+     * the bench site reference two nodes each. getTargetNode() answers only the first, resolved to
+     * its page, because a preview link can only go to one place - this answers all of them, as
+     * themselves. A reference whose target has been deleted is skipped rather than failing the row.
+     */
+    @GraphQLField
+    @GraphQLDescription("Every piece of content this task is about, with the name and type a reader "
+            + "recognises and where to go to act on it")
+    public List<GqlTaskTarget> getTargets() {
+        try {
+            if (!node.hasProperty("targetNode")) {
+                return Collections.emptyList();
+            }
+
+            List<GqlTaskTarget> targets = new ArrayList<>();
+            JCRSessionWrapper session = node.getSession();
+            for (Value value : node.getProperty("targetNode").isMultiple() ?
+                    node.getProperty("targetNode").getValues() :
+                    new Value[]{node.getProperty("targetNode").getValue()}) {
+                try {
+                    targets.add(new GqlTaskTarget((JCRNodeWrapper) session.getNodeByIdentifier(value.getString())));
+                } catch (ItemNotFoundException e) {
+                    // A weak reference whose target is gone. The task still makes sense without it.
+                }
+            }
+
+            return targets;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve the task's targets", e);
+        }
+    }
+
     @GraphQLField
     @GraphQLDescription("The page this task is about (e.g. a page pending publication), if any -- resolved to the "
             + "nearest containing page when the workflow's actual target is a sub-node within one (an area's "
