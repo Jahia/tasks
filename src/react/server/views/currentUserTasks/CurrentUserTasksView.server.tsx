@@ -38,7 +38,7 @@ jahiaComponent(
                 <Island
                     component={TaskBoard}
                     props={{
-                        initialConnection: result.taskBoard,
+                        initialColumns: result,
                         graphqlEndpoint: buildEndpointUrl('/modules/graphql'),
                         currentUserKey: result.taskBoardCurrentUserKey,
                         canReviewAll: result.taskBoardCanReviewAll

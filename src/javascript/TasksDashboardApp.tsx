@@ -59,7 +59,7 @@ export function TasksDashboardApp() {
 
     return (
         <TaskBoard
-            initialConnection={state.data.taskBoard}
+            initialColumns={state.data}
             graphqlEndpoint={GRAPHQL_ENDPOINT}
             currentUserKey={state.data.taskBoardCurrentUserKey}
             canReviewAll={state.data.taskBoardCanReviewAll}

@@ -8,18 +8,7 @@
  * both sides.
  */
 
-// The states the board lists. Closed ("finished") tasks are included: somebody needs to see that
-// the work was done, and which of it. They cannot bury the live work, because the server sorts the
-// closed ones into a group of their own that always follows the open ones, whatever the caller
-// sorted by -- see TaskBoardQueryExtensions' CLOSED_STATE.
-//
-// "cancelled" is the state left out. It exists in the node type's choicelist and nothing in this UI
-// ever writes it, so listing it would only ever show something this board did not put there.
-//
-// Passed as an explicit filterState value (an existing but, until now, never-actually-called server
-// arg -- see TaskBoardQueryExtensions#taskBoard) rather than baked into the server as a hidden
-// default, so the taskBoard query itself stays a complete, neutral listing endpoint.
-export const BOARD_STATES = ['active', 'started', 'suspended', 'finished'];
+export type ColumnKey = 'active' | 'started' | 'closed';
 
 // The board's own default sort -- a concrete starting field/direction rather than "no sort at
 // all", so a sort-by control always has a real selected value to display (and so the very first
@@ -60,12 +49,65 @@ export const DEFAULT_SCOPE: TaskScope = 'assignedToMe';
 export const CLOSED_STATE = 'finished';
 export const CLOSED_STATE_LABEL = 'Closed';
 
+export type BoardColumn = {
+    key: ColumnKey;
+    label: string;
+    // The states whose tasks belong in this column. Sent to the server as filterState, so each
+    // column is its own query and a long list in one of them cannot push the others around.
+    states: string[];
+    // The state a card takes when it is dropped into this column.
+    entryState: string;
+};
+
+/**
+ * The board's three columns, in order. The order is not decoration: a card may be dragged to the
+ * NEXT or the PREVIOUS column and no further, and "next" means next in this array.
+ *
+ * **Where "suspended" went.** A refused task is parked, not progressed and not done, so it belongs
+ * with the work that has not been started -- this column is "not started yet", of which "active"
+ * is the ordinary case and "suspended" the parked one. It keeps its own Suspended chip, so the two
+ * are still told apart inside the column. Giving it a fourth column would say it is a stage of its
+ * own, which it is not.
+ *
+ * **"cancelled" is the state left off the board entirely.** It exists in the node type's choicelist
+ * and nothing in this UI ever writes it, so a column for it would only ever show something this
+ * board did not put there.
+ *
+ * entryState is what a drop WRITES, which is not always the state the column already holds:
+ * dropping a suspended card back into its own column is a no-op, but dropping a started one there
+ * resets it to active rather than to suspended -- moving work back is not the same as refusing it.
+ */
+export const BOARD_COLUMNS: BoardColumn[] = [
+    {key: 'active', label: 'Active', states: ['active', 'suspended'], entryState: 'active'},
+    {key: 'started', label: 'Started', states: ['started'], entryState: 'started'},
+    {key: 'closed', label: CLOSED_STATE_LABEL, states: [CLOSED_STATE], entryState: CLOSED_STATE}
+];
+
+/** Which column a task is currently sitting in, or null for a state the board does not list. */
+export const columnKeyOf = (state: string | null): ColumnKey | null =>
+    BOARD_COLUMNS.find(column => column.states.includes(state ?? ''))?.key ?? null;
+
+/** How many columns apart two of them are, signed: +1 is one to the right. */
+export const columnStep = (from: ColumnKey, to: ColumnKey): number =>
+    BOARD_COLUMNS.findIndex(column => column.key === to) -
+    BOARD_COLUMNS.findIndex(column => column.key === from);
+
 // What an empty board means, which depends entirely on which list is showing.
 export const EMPTY_SCOPE_MESSAGE: Record<TaskScope, string> = {
     assignedToMe: 'No task is assigned to you.',
     createdByMe: 'You have not created any task.',
     claimable: 'There is no task waiting to be taken.'
 };
+
+/** The per-column page-size variables the document declares, all set to the same size. */
+export const columnFirsts = (pageSize: number): Record<string, number> =>
+    Object.fromEntries(BOARD_COLUMNS.map(column => [`${column.key}First`, pageSize]));
+
+/** How many rows each column is currently asking for, keyed the way the board's state keeps it. */
+export type ColumnLimits = Record<ColumnKey, number>;
+
+export const columnFirstsFrom = (limits: ColumnLimits): Record<string, number> =>
+    Object.fromEntries(BOARD_COLUMNS.map(column => [`${column.key}First`, limits[column.key]]));
 
 /**
  * The variables the FIRST page is fetched with, by the two places that fetch it before TaskBoard
@@ -79,99 +121,93 @@ export const EMPTY_SCOPE_MESSAGE: Record<TaskScope, string> = {
  * arrived showing every task with "Assigned to me" selected.
  */
 export const initialBoardVariables = (pageSize: number) => ({
-    first: pageSize,
-    filterState: BOARD_STATES,
+    ...columnFirsts(pageSize),
+    search: null,
     sortBy: DEFAULT_SORT_BY,
     sortOrder: DEFAULT_SORT_ORDER,
     scope: DEFAULT_SCOPE
 });
 
-export const TASK_BOARD_QUERY = /* GraphQL */ `
-    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String) {
-        taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState, scope: $scope) {
-            pageInfo {
-                hasNextPage
-                endCursor
-                totalCount
-            }
-            edges {
-                node {
-                    id
-                    title
-                    creator
-                    createdDate
-                    dueDate
-                    owner
-                    assigneeDisplayName
-                    state
-                    taskType
-                    possibleOutcomes
-                    description
-                    workflowSummary
-                    viewerRole
-                    candidateDisplayNames
-                    targets {
-                        uuid
-                        displayName
-                        typeName
-                        inPage
-                        locationPath
-                    }
-                    targetNode {
-                        url
-                        property(name: "jcr:title") {
-                            value
-                        }
-                    }
-                }
+/**
+ * Everything a card shows. Interpolated into one aliased query per column rather than expressed as
+ * a GraphQL fragment: a fragment has to name the type it applies to, and this file is deliberately
+ * free of any import from the module library that would tell it what that type is called.
+ */
+const TASK_CARD_FIELDS = /* GraphQL */ `
+    id
+    title
+    creator
+    createdDate
+    dueDate
+    owner
+    assigneeDisplayName
+    state
+    taskType
+    possibleOutcomes
+    description
+    workflowSummary
+    viewerRole
+    candidateDisplayNames
+    targets {
+        uuid
+        displayName
+        typeName
+        inPage
+        locationPath
+    }
+    targetNode {
+        url
+        property(name: "jcr:title") {
+            value
+        }
+    }
+`;
+
+/**
+ * One column's slice of the board, aliased under the column's own key.
+ *
+ * Each column is a separate taskBoard call with its own filterState and its own page size, so a
+ * hundred closed tasks cannot crowd out the active ones and "show more" in one column leaves the
+ * other two alone. The states are this file's own constants, not caller input, so they go into the
+ * document as literals; everything a person can influence -- the search text, the sort, the scope
+ * -- stays a bind variable.
+ */
+const columnSelection = (column: BoardColumn) => /* GraphQL */ `
+    ${column.key}: taskBoard(
+        first: $${column.key}First
+        search: $search
+        sortBy: $sortBy
+        sortOrder: $sortOrder
+        scope: $scope
+        filterState: ${JSON.stringify(column.states)}
+    ) {
+        pageInfo {
+            hasNextPage
+            totalCount
+        }
+        edges {
+            node {
+                ${TASK_CARD_FIELDS}
             }
         }
     }
 `;
 
-// Used only by the SSR view for the first page: adds the viewer fields the
-// client island needs for its action-menu display logic (see
-// TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll).
+const COLUMN_ARGUMENTS = BOARD_COLUMNS.map(column => `$${column.key}First: Int!`).join(', ');
+const COLUMN_SELECTIONS = BOARD_COLUMNS.map(columnSelection).join('\n');
+
+export const TASK_BOARD_QUERY = /* GraphQL */ `
+    query TaskBoard(${COLUMN_ARGUMENTS}, $search: String, $sortBy: String, $sortOrder: String, $scope: String) {
+        ${COLUMN_SELECTIONS}
+    }
+`;
+
+// Used only for the board's first render: adds the viewer fields the card's action logic needs
+// (see TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll). They never change
+// while the board is open, so no later fetch asks for them again.
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
-    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $scope: String) {
-        taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: $scope) {
-            pageInfo {
-                hasNextPage
-                endCursor
-                totalCount
-            }
-            edges {
-                node {
-                    id
-                    title
-                    creator
-                    createdDate
-                    dueDate
-                    owner
-                    assigneeDisplayName
-                    state
-                    taskType
-                    possibleOutcomes
-                    description
-                    workflowSummary
-                    viewerRole
-                    candidateDisplayNames
-                    targets {
-                        uuid
-                        displayName
-                        typeName
-                        inPage
-                        locationPath
-                    }
-                    targetNode {
-                        url
-                        property(name: "jcr:title") {
-                            value
-                        }
-                    }
-                }
-            }
-        }
+    query InitialTaskBoard(${COLUMN_ARGUMENTS}, $search: String, $sortBy: String, $sortOrder: String, $scope: String) {
+        ${COLUMN_SELECTIONS}
         taskBoardCurrentUserKey
         taskBoardCanReviewAll
     }
@@ -262,9 +298,8 @@ export type TaskBoardConnection = {
     edges: Array<{node: TaskBoardNode}>;
 };
 
-export type TaskBoardQueryResult = {
-    taskBoard: TaskBoardConnection;
-};
+// One connection per column, keyed by the aliases columnSelection() emits.
+export type TaskBoardQueryResult = Record<ColumnKey, TaskBoardConnection>;
 
 export type InitialTaskBoardQueryResult = TaskBoardQueryResult & {
     taskBoardCurrentUserKey: string;

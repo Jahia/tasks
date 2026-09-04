@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {ArrowDown, ArrowUp, Banner, Button, Chip, Dropdown, EmptyData, Header, Input, Loader, Pagination, Search, Typography} from '@jahia/moonstone';
+import {ArrowDown, ArrowUp, Banner, Button, Chip, Dropdown, EmptyData, Header, Input, Loader, Search, Typography} from '@jahia/moonstone';
 // Deep import, not the package's bare '@jahia/moonstone-alpha' entry point: that barrel
 // (dist/components/index.js) re-exports Checkbox/DatePicker/etc. too, which drag in transitive
 // deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
@@ -8,7 +8,7 @@ import {ContentLayout} from '@jahia/moonstone-alpha/dist/components/ContentLayou
 import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
-    BOARD_STATES,
+    BOARD_COLUMNS,
     CLOSED_STATE,
     CLOSED_STATE_LABEL,
     COMPLETE_TASK_MUTATION,
@@ -17,17 +17,38 @@ import {
     DEFAULT_SORT_ORDER,
     EMPTY_SCOPE_MESSAGE,
     RESUME_TASK_MUTATION,
-    SUSPEND_TASK_MUTATION,
     TASK_BOARD_QUERY,
     TASK_SCOPES,
-    UNASSIGN_TASK_MUTATION
+    UNASSIGN_TASK_MUTATION,
+    columnFirstsFrom,
+    columnStep
 } from './taskBoard.shared';
-import type {TaskBoardConnection, TaskBoardNode, TaskScope, TaskTarget} from './taskBoard.shared';
+import type {
+    BoardColumn,
+    ColumnKey,
+    ColumnLimits,
+    TaskBoardConnection,
+    TaskBoardNode,
+    TaskBoardQueryResult,
+    TaskScope,
+    TaskTarget
+} from './taskBoard.shared';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
-const ITEMS_PER_PAGE_OPTIONS = [10, 25, 50, 100];
+
+// How many more rows a column's "show more" asks for each time.
+const SHOW_MORE_STEP = DEFAULT_PAGE_SIZE;
+
+// One stable object, not a fresh one per reset: setLimits(DEFAULT_LIMITS) when the limits already
+// ARE the defaults has to be a no-op, or every change of search/sort/scope would fetch twice --
+// once for the change itself and once for the new object identity.
+const DEFAULT_LIMITS: ColumnLimits = Object.freeze({
+    active: DEFAULT_PAGE_SIZE,
+    started: DEFAULT_PAGE_SIZE,
+    closed: DEFAULT_PAGE_SIZE
+}) as ColumnLimits;
 // Debounce so every keystroke doesn't fire its own request -- this is a server round-trip
 // (TaskBoardQueryExtensions#taskBoard filters title/creator/assignee/state), not a client-side
 // filter over an already-fully-loaded list.
@@ -51,7 +72,7 @@ const SORT_OPTIONS: Array<{label: string; value: SortField}> = [
 ];
 
 type TaskBoardProps = {
-    initialConnection: TaskBoardConnection;
+    initialColumns: TaskBoardQueryResult;
     graphqlEndpoint: string;
     currentUserKey: string;
     canReviewAll: boolean;
@@ -303,12 +324,15 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         variables: {id: task.id, state: 'finished'}
     };
     // "Refuse" parks the task rather than handing it back - Unassign is what returns it to the
-    // pool. suspendTask would be the natural mutation, but it accepts only a started task
-    // ("Only a started task can be suspended"), so an assigned-but-not-started one goes through
-    // updateTaskState, which carries the same permission check and the same single write.
-    const refuse = (state: string): MenuAction => (state === 'started' ?
-        {label: 'Refuse', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}} :
-        {label: 'Refuse', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'suspended'}});
+    // pool. Offered on an active task only (see the started branch below), so it always takes the
+    // updateTaskState route: suspendTask would be the natural mutation but it accepts a started
+    // task only ("Only a started task can be suspended"). updateTaskState carries the same
+    // permission check and the same single write.
+    const refuse: MenuAction = {
+        label: 'Refuse',
+        mutation: UPDATE_TASK_STATE_MUTATION,
+        variables: {id: task.id, state: 'suspended'}
+    };
 
     if (task.state === 'active' && isUnassigned) {
         primaryActions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
@@ -317,16 +341,17 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         primaryActions.push(
             {label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}},
             {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            refuse(task.state)
+            refuse
         );
         if (isPlainTask) {
             primaryActions.push(close);
         }
     } else if (canAct && task.state === 'started') {
-        primaryActions.push(
-            {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            refuse(task.state)
-        );
+        // No Unassign and no Refuse here, deliberately. Both are answers to "I am not going to do
+        // this", and once the work is started that answer is out of date: what is left is to
+        // finish it, or to move it back to Active first and then hand it back. Keeping them on a
+        // started task also made the two hard to tell apart -- Refuse parks the task while
+        // Unassign returns it to the pool, a distinction nobody has to care about before starting.
         if (isPlainTask) {
             primaryActions.push(close);
         }
@@ -399,10 +424,13 @@ type TaskCardProps = {
     currentUserKey: string;
     canReviewAll: boolean;
     isBusy: boolean;
+    canDrag: boolean;
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
+    onDragStart: () => void;
+    onDragEnd: () => void;
 };
 
-function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskCardProps>) {
+function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction, onDragStart, onDragEnd}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
     const language = jcontentLanguage();
@@ -418,7 +446,20 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
     const isClosed = task.state === CLOSED_STATE;
 
     return (
-        <div className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}`}>
+        <div
+            className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}${canDrag ? ' task-board__card--draggable' : ''}`}
+            draggable={canDrag}
+            onDragStart={event => {
+                // Firefox will not begin a drag with an empty dataTransfer, and the task's own id
+                // is the natural payload -- though the board reads the dragged task from its own
+                // state rather than back out of here, since it needs the whole node to decide
+                // which columns will accept it.
+                event.dataTransfer.setData('text/plain', task.id);
+                event.dataTransfer.effectAllowed = 'move';
+                onDragStart();
+            }}
+            onDragEnd={onDragEnd}
+        >
             {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
                 nobody owns a task, and the property behind it is the assignee. */}
             <Typography component="p" variant="caption" weight="light" className="task-board__meta">
@@ -504,13 +545,157 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, onAction}: Readon
     );
 }
 
-export default function TaskBoard({initialConnection, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
-    const [currentPage, setCurrentPage] = useState(1);
-    const [connection, setConnection] = useState(initialConnection);
+type DragState = {
+    task: TaskBoardNode;
+    from: ColumnKey;
+};
+
+/**
+ * Why this card cannot be dropped in that column, as a sentence to show the reader, or null when
+ * it can.
+ *
+ * The server re-checks all of it (TaskBoardMutationExtensions#updateTaskState takes any state it
+ * is given from anyone who may act on the task), so this is not the security boundary -- it is
+ * what stops a drag from producing a state nobody meant.
+ *
+ * The step check is the rule the user asked for: one column at a time, forward or back. Dropping a
+ * card back into the column it came from is not a refusal, it is simply nothing to do.
+ */
+function dropRefusal(drag: DragState, to: ColumnKey, currentUserKey: string, canReviewAll: boolean): string | null {
+    const step = columnStep(drag.from, to);
+    if (step === 0) {
+        return null;
+    }
+
+    if (Math.abs(step) !== 1) {
+        return 'A task moves one column at a time.';
+    }
+
+    if (drag.task.owner !== currentUserKey && !canReviewAll) {
+        return 'Only the person this task is assigned to can move it.';
+    }
+
+    // An unassigned task in the Active column is one nobody has taken. Starting or closing it
+    // would leave work in progress that belongs to no one, so it gets taken first -- which is the
+    // "Assign to me" button already on the card.
+    if (!drag.task.owner) {
+        return 'Nobody holds this task yet -- use "Assign to me" first.';
+    }
+
+    // The same rule the card's own Close button follows: completeTask writes finalOutcome in the
+    // same save because the workflow rule reads it off the node, and a workflow task finished
+    // without one tells the real workflow nothing. Its decision buttons are how it closes.
+    if (to === 'closed' && drag.task.taskType === 'jnt:workflowTask') {
+        return 'A workflow task is closed by its own decision, not by moving it.';
+    }
+
+    return null;
+}
+
+type BoardColumnViewProps = {
+    column: BoardColumn;
+    connection: TaskBoardConnection;
+    currentUserKey: string;
+    canReviewAll: boolean;
+    busyTaskId: string | null;
+    dragging: DragState | null;
+    isUnderPointer: boolean;
+    onAction: (mutation: string, variables: Record<string, unknown>) => void;
+    onDragStart: (drag: DragState) => void;
+    onDragEnd: () => void;
+    onHover: (key: ColumnKey) => void;
+    onDrop: (key: ColumnKey) => void;
+    onShowMore: (key: ColumnKey) => void;
+};
+
+function BoardColumnView({
+    column, connection, currentUserKey, canReviewAll, busyTaskId, dragging, isUnderPointer,
+    onAction, onDragStart, onDragEnd, onHover, onDrop, onShowMore
+}: Readonly<BoardColumnViewProps>) {
+    const rows = connection.edges.map(edge => edge.node);
+    const total = connection.pageInfo.totalCount;
+
+    // What this column looks like while a card is in hand: lifted if that card could land here,
+    // dimmed if it could not. Neither, for the column the card is already in -- a drop back where
+    // it started is nothing to do, and highlighting it would promise a move.
+    const refusal = dragging ? dropRefusal(dragging, column.key, currentUserKey, canReviewAll) : null;
+    const wouldMove = dragging !== null && columnStep(dragging.from, column.key) !== 0;
+    let dragClass = '';
+    if (wouldMove) {
+        dragClass = refusal ? ' task-board__column--blocked' : ' task-board__column--open';
+        if (isUnderPointer) {
+            dragClass += ' task-board__column--over';
+        }
+    }
+
+    return (
+        <section
+            className={`task-board__column${dragClass}`}
+            aria-label={`${column.label}, ${total} task(s)`}
+            onDragEnter={() => onHover(column.key)}
+            onDragOver={event => {
+                // preventDefault is what makes this a drop target at all, and it runs even for a
+                // move that will be refused: onDrop is the only place that can say WHY, and the
+                // reason is worth more to the reader than a no-drop cursor. The cursor still says
+                // it too, via dropEffect.
+                event.preventDefault();
+                event.dataTransfer.dropEffect = refusal ? 'none' : 'move';
+            }}
+            onDrop={event => {
+                event.preventDefault();
+                onDrop(column.key);
+            }}
+        >
+            <header className="task-board__column-header">
+                <Typography variant="subheading" weight="semiBold">{column.label}</Typography>
+                <Chip label={String(total)} color="light"/>
+            </header>
+            <div className="task-board__column-body">
+                {rows.length === 0 && (
+                    <Typography variant="caption" weight="light" className="task-board__column-empty">
+                        Nothing here.
+                    </Typography>
+                )}
+                {rows.map(task => (
+                    <TaskCard
+                        key={task.id}
+                        task={task}
+                        currentUserKey={currentUserKey}
+                        canReviewAll={canReviewAll}
+                        isBusy={busyTaskId === task.id}
+                        // Same test the card's own buttons use: somebody who cannot act on a task
+                        // cannot move it either, so it does not offer a drag that would be refused.
+                        canDrag={task.owner === currentUserKey || canReviewAll}
+                        onAction={onAction}
+                        onDragStart={() => onDragStart({task, from: column.key})}
+                        onDragEnd={onDragEnd}
+                    />
+                ))}
+                {connection.pageInfo.hasNextPage && (
+                    <Button
+                        variant="ghost"
+                        size="small"
+                        label={`Show more (${rows.length} of ${total})`}
+                        onClick={() => onShowMore(column.key)}
+                    />
+                )}
+            </div>
+        </section>
+    );
+}
+
+export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
+    const [columns, setColumns] = useState(initialColumns);
+    // How many rows each column is asking for. Per column, so "show more" on a long Closed list
+    // does not also re-fetch the two beside it.
+    const [limits, setLimits] = useState<ColumnLimits>(DEFAULT_LIMITS);
     const [isLoading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // A refused drag is not a failure, it is a rule -- so it gets its own banner rather than
+    // "Something went wrong", which would tell somebody the board is broken when it is working
+    // exactly as intended.
+    const [notice, setNotice] = useState<string | null>(null);
     const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
-    const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_PAGE_SIZE);
     // searchInput is what the box shows on every keystroke; search is the debounced value
     // that actually goes into the query (see SEARCH_DEBOUNCE_MS above).
     const [searchInput, setSearchInput] = useState('');
@@ -522,49 +707,59 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     // Which of the three lists is showing (see TASK_SCOPES). Single-select: they are alternative
     // answers to "which tasks", not filters that stack.
     const [scope, setScope] = useState<TaskScope>(DEFAULT_SCOPE);
-    // Relay-style cursor pagination only supports moving forward one page at a
-    // time; this caches the cursor needed to fetch each page once it has been
-    // reached, so navigating back to an already-visited page doesn't require
-    // re-fetching every page before it.
-    const cursorsByPage = useRef<Map<number, string | undefined>>(new Map([[1, undefined]]));
+    // The card in hand, whole rather than by id: deciding which columns will take it needs its
+    // assignee and its node type, not just which row it is.
+    //
+    // Held twice, deliberately. The state drives the columns' drag highlighting, which needs a
+    // render to show. The ref is what the DROP reads, and it has to be a ref: a state update from
+    // dragstart is not visible to a handler that runs before React has re-rendered, and nothing
+    // guarantees a render happens in between - dispatch the two in one task and the drop reads the
+    // value from before the drag began, which is null, and silently does nothing.
+    const dragRef = useRef<DragState | null>(null);
+    const [dragging, setDragging] = useState<DragState | null>(null);
+    const [dropTarget, setDropTarget] = useState<ColumnKey | null>(null);
+
+    const beginDrag = useCallback((drag: DragState) => {
+        dragRef.current = drag;
+        setDragging(drag);
+    }, []);
 
     useEffect(() => {
-        if (connection.pageInfo.hasNextPage) {
-            cursorsByPage.current.set(currentPage + 1, connection.pageInfo.endCursor ?? undefined);
-        }
-    }, [currentPage, connection.pageInfo.hasNextPage, connection.pageInfo.endCursor]);
-
-    useEffect(() => {
-        const handle = setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+        const handle = setTimeout(() => {
+            setSearch(searchInput.trim());
+            // A new search changes what every column holds, so none of them keeps a raised limit.
+            setLimits(DEFAULT_LIMITS);
+        }, SEARCH_DEBOUNCE_MS);
         return () => clearTimeout(handle);
     }, [searchInput]);
 
-    const loadPage = useCallback(async (page: number) => {
+    const loadBoard = useCallback(async () => {
         setLoading(true);
         setError(null);
+        setNotice(null);
         try {
-            const data = await callGraphQL<{taskBoard: TaskBoardConnection}>(graphqlEndpoint, TASK_BOARD_QUERY, {
-                first: itemsPerPage,
-                after: cursorsByPage.current.get(page),
+            // All three columns in one document (see TASK_BOARD_QUERY): they share the search, the
+            // sort and the scope, and fetching them together keeps them consistent with each other
+            // as well as saving two round trips.
+            const data = await callGraphQL<TaskBoardQueryResult>(graphqlEndpoint, TASK_BOARD_QUERY, {
+                ...columnFirstsFrom(limits),
                 search: search === '' ? null : search,
                 sortBy,
                 sortOrder,
-                filterState: BOARD_STATES,
                 scope
             });
-            setConnection(data.taskBoard);
-            setCurrentPage(page);
+            setColumns(data);
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to load tasks.');
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search, sortBy, sortOrder, scope]);
+    }, [graphqlEndpoint, limits, search, sortBy, sortOrder, scope]);
 
-    // itemsPerPage/search/sortBy/sortOrder/scope all change what the *first* page even means, so
-    // none of them can be applied by just re-fetching the current page -- every cached cursor is
-    // invalidated and this always jumps back to page 1. Skipped on mount: initialConnection
-    // already is page 1 at the (unchanged) defaults.
+    // Every input to the query is already in loadBoard's dependency list, so "re-fetch when
+    // something changed" is exactly "re-fetch when loadBoard changed" -- there is no second list
+    // here to drift out of step with that one. Skipped on mount: initialColumns IS this fetch, at
+    // these same defaults (see initialBoardVariables).
     const isInitialMount = useRef(true);
     useEffect(() => {
         if (isInitialMount.current) {
@@ -572,55 +767,107 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
             return;
         }
 
-        cursorsByPage.current = new Map([[1, undefined]]);
-        loadPage(1);
-        // Deliberately reacts only to itemsPerPage/search/sortBy/sortOrder/scope: loadPage already
-        // closes over all five (declared above) plus graphqlEndpoint/currentPage, which this
-        // effect doesn't care about.
-    }, [itemsPerPage, search, sortBy, sortOrder, scope]);
-
-    const handlePageChange = (nextPage: number) => {
-        // Clamp forward jumps to one page at a time -- see the cursor cache
-        // comment above for why arbitrary jumps aren't possible here.
-        const target = nextPage <= currentPage ? Math.max(1, nextPage) : currentPage + 1;
-        if (target !== currentPage) {
-            loadPage(target);
-        }
-    };
+        loadBoard();
+    }, [loadBoard]);
 
     const handleAction = useCallback(async (mutation: string, variables: Record<string, unknown>) => {
         setBusyTaskId(String(variables.id));
         setError(null);
+        setNotice(null);
         try {
             await callGraphQL(graphqlEndpoint, mutation, variables);
-            await loadPage(currentPage);
+            await loadBoard();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to complete this action.');
         } finally {
             setBusyTaskId(null);
         }
-    }, [graphqlEndpoint, currentPage, loadPage]);
+    }, [graphqlEndpoint, loadBoard]);
 
-    const rows = connection.edges.map(edge => edge.node);
+    // A drop is a state change and nothing more: the card lands in the column whose entryState it
+    // is given, and the board re-fetches, so where it ends up is what the server actually stored
+    // rather than where the pointer let go.
+    const handleDrop = useCallback((to: ColumnKey) => {
+        const drag = dragRef.current;
+        dragRef.current = null;
+        setDragging(null);
+        setDropTarget(null);
+        if (drag === null) {
+            return;
+        }
+
+        const refusal = dropRefusal(drag, to, currentUserKey, canReviewAll);
+        if (refusal !== null) {
+            setNotice(refusal);
+            return;
+        }
+
+        const column = BOARD_COLUMNS.find(candidate => candidate.key === to);
+        if (column === undefined || columnStep(drag.from, to) === 0) {
+            return;
+        }
+
+        handleAction(UPDATE_TASK_STATE_MUTATION, {id: drag.task.id, state: column.entryState});
+        // Deliberately not dependent on `dragging`: the drop reads dragRef, so this callback stays
+        // stable across the drag instead of being rebuilt the moment one starts.
+    }, [currentUserKey, canReviewAll, handleAction]);
+
+    const endDrag = useCallback(() => {
+        dragRef.current = null;
+        setDragging(null);
+        setDropTarget(null);
+    }, []);
+
+    const showMore = useCallback((key: ColumnKey) => {
+        setLimits(current => ({...current, [key]: current[key] + SHOW_MORE_STEP}));
+    }, []);
+
+    // Changing what the board is showing puts every column back to one page: a limit raised on the
+    // old list means nothing on the new one.
+    const changeScope = (next: TaskScope) => {
+        setScope(next);
+        setLimits(DEFAULT_LIMITS);
+    };
+
+    const changeSortBy = (next: SortField) => {
+        setSortBy(next);
+        setLimits(DEFAULT_LIMITS);
+    };
+
+    const toggleSortOrder = () => {
+        setSortOrder(current => (current === 'ascending' ? 'descending' : 'ascending'));
+        setLimits(DEFAULT_LIMITS);
+    };
+
+    const isEmpty = BOARD_COLUMNS.every(column => columns[column.key].pageInfo.totalCount === 0);
+    const totalCount = BOARD_COLUMNS.reduce((sum, column) => sum + columns[column.key].pageInfo.totalCount, 0);
 
     let boardContent;
     if (isLoading) {
         boardContent = <Loader/>;
-    } else if (rows.length === 0) {
+    } else if (isEmpty) {
         // A search that found nothing is a different situation from a list that is simply empty,
         // and saying "no task is assigned to you" while a search term is in the box would be wrong.
         boardContent = <EmptyData message={search === '' ? EMPTY_SCOPE_MESSAGE[scope] : 'No task matches this search.'}/>;
     } else {
         boardContent = (
-            <div className="task-board__list">
-                {rows.map(task => (
-                    <TaskCard
-                        key={task.id}
-                        task={task}
+            <div className="task-board__columns">
+                {BOARD_COLUMNS.map(column => (
+                    <BoardColumnView
+                        key={column.key}
+                        column={column}
+                        connection={columns[column.key]}
                         currentUserKey={currentUserKey}
                         canReviewAll={canReviewAll}
-                        isBusy={busyTaskId === task.id}
+                        busyTaskId={busyTaskId}
+                        dragging={dragging}
+                        isUnderPointer={dropTarget === column.key}
                         onAction={handleAction}
+                        onDragStart={beginDrag}
+                        onDragEnd={endDrag}
+                        onHover={setDropTarget}
+                        onDrop={handleDrop}
+                        onShowMore={showMore}
                     />
                 ))}
             </div>
@@ -639,7 +886,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                 <div className="task-board__content">
                     <div className="task-board__toolbar">
                         <div className="task-board__scopes" role="group" aria-label="Which tasks to show">
-                            <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
+                            <Typography variant="caption" weight="light">{totalCount} task(s)</Typography>
                             {TASK_SCOPES.map(option => (
                                 <button
                                     key={option.value}
@@ -648,7 +895,7 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                                     // aria-pressed rather than aria-selected: these are toggle
                                     // buttons in a group, not tabs over one panel of content.
                                     aria-pressed={scope === option.value}
-                                    onClick={() => setScope(option.value)}
+                                    onClick={() => changeScope(option.value)}
                                 >
                                     {option.label}
                                 </button>
@@ -661,14 +908,14 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                                     size="small"
                                     data={SORT_OPTIONS}
                                     value={sortBy}
-                                    onChange={(_event, item) => setSortBy(item.value as SortField)}
+                                    onChange={(_event, item) => changeSortBy(item.value as SortField)}
                                 />
                                 <Button
                                     icon={sortOrder === 'descending' ? <ArrowDown/> : <ArrowUp/>}
                                     variant="ghost"
                                     size="small"
                                     aria-label={sortOrder === 'descending' ? 'Sort ascending' : 'Sort descending'}
-                                    onClick={() => setSortOrder(current => (current === 'ascending' ? 'descending' : 'ascending'))}
+                                    onClick={toggleSortOrder}
                                 />
                             </div>
                             <div className="task-board__search">
@@ -688,17 +935,12 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                             {error}
                         </Banner>
                     )}
-                    {boardContent}
-                    {!isLoading && rows.length > 0 && (
-                        <Pagination
-                            currentPage={currentPage}
-                            itemsPerPage={itemsPerPage}
-                            itemsPerPageOptions={ITEMS_PER_PAGE_OPTIONS}
-                            onItemsPerPageChange={setItemsPerPage}
-                            totalOfItems={connection.pageInfo.totalCount}
-                            onPageChange={handlePageChange}
-                        />
+                    {notice && (
+                        <Banner title="That move is not allowed" variant="info">
+                            {notice}
+                        </Banner>
                     )}
+                    {boardContent}
                 </div>
             )}
         />

@@ -91,6 +91,81 @@
     gap: var(--spacing-medium);
 }
 
+/*
+ * The board proper: the three columns of BOARD_COLUMNS, each scrolling on its own so a hundred
+ * closed tasks in one of them cannot push the other two off the screen. minmax(0, 1fr) rather than
+ * plain 1fr - a grid track's automatic minimum is its content, and a long unbroken task title
+ * would otherwise widen its column and squeeze the others.
+ */
+.task-board__columns {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--spacing-medium);
+    /* Fills what the toolbar leaves; min-height:0 is what lets the bodies inside scroll instead of
+       growing the page (the same reason .task-board__content needs it). */
+    flex: 1 1 0;
+    min-height: 0;
+}
+
+.task-board__column {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+    min-width: 0;
+    padding: var(--spacing-small);
+    border-radius: 4px;
+    /* A faint ground, so a white card reads as an object sitting in a column. Lighter than the
+       closed card's own grey, which has to stay distinguishable from the column behind it. */
+    background-color: var(--color-gray_light20, #dadada33);
+    /* Drawn on both drop states so the outline does not change the column's size when it appears. */
+    outline: 1px dashed transparent;
+}
+
+.task-board__column-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-small);
+    padding: 0 var(--spacing-nano);
+}
+
+.task-board__column-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-small);
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.task-board__column-empty {
+    padding: var(--spacing-small) var(--spacing-nano);
+}
+
+/*
+ * While a card is in hand. Only ever applied to a column the card is NOT already in: a drop back
+ * where it started is nothing to do, and lifting that column would promise a move.
+ */
+.task-board__column--open {
+    outline-color: var(--color-accent, #00a0e3);
+}
+
+.task-board__column--blocked {
+    opacity: 0.55;
+}
+
+/* The one actually under the pointer: solid rather than dashed, and tinted. */
+.task-board__column--open.task-board__column--over {
+    outline-style: solid;
+    background-color: var(--color-accent_light20, #63d1ff33);
+}
+
+.task-board__card--draggable {
+    cursor: grab;
+}
+
+.task-board__card--draggable:active {
+    cursor: grabbing;
+}
+
 .task-board__card {
     display: flex;
     flex-direction: column;
