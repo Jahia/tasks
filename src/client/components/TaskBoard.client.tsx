@@ -266,19 +266,49 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
     const decisionActions: MenuAction[] = [];
     let showPreview = false;
 
+    // Closing a plain task means writing state=finished directly. A workflow task must NEVER be
+    // closed that way: completeTask writes finalOutcome in the same save because the Drools rule
+    // reads it off the node as it reacts to the state change, and finishing without one would tell
+    // the real workflow nothing about the decision. So Close is offered only for a jnt:task, and a
+    // jnt:workflowTask is finished through its own outcome buttons below.
+    //
+    // Decided on the node type rather than on possibleOutcomes being empty: a workflow task whose
+    // process is no longer live also reports no outcomes, and that one must stay un-closable rather
+    // than quietly take the plain-task path.
+    const isPlainTask = task.taskType !== 'jnt:workflowTask';
+    const close: MenuAction = {
+        label: 'Close',
+        mutation: UPDATE_TASK_STATE_MUTATION,
+        variables: {id: task.id, state: 'finished'}
+    };
+    // "Refuse" parks the task rather than handing it back - Unassign is what returns it to the
+    // pool. suspendTask would be the natural mutation, but it accepts only a started task
+    // ("Only a started task can be suspended"), so an assigned-but-not-started one goes through
+    // updateTaskState, which carries the same permission check and the same single write.
+    const refuse = (state: string): MenuAction => (state === 'started' ?
+        {label: 'Refuse', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}} :
+        {label: 'Refuse', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'suspended'}});
+
     if (task.state === 'active' && isUnassigned) {
         primaryActions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}});
     } else if (canAct && task.state === 'active') {
         // Assigned, not started yet.
         primaryActions.push(
+            {label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}},
             {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {label: 'Start', mutation: UPDATE_TASK_STATE_MUTATION, variables: {id: task.id, state: 'started'}}
+            refuse(task.state)
         );
+        if (isPlainTask) {
+            primaryActions.push(close);
+        }
     } else if (canAct && task.state === 'started') {
         primaryActions.push(
             {label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}},
-            {label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}}
+            refuse(task.state)
         );
+        if (isPlainTask) {
+            primaryActions.push(close);
+        }
         showPreview = true;
         // Reject publication before Publish, matching the requested layout order, regardless of
         // the order possibleOutcomes happens to list them in (workflow-definition-specific).
@@ -290,6 +320,11 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
         }
     } else if (canAct && task.state === 'suspended') {
         primaryActions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}});
+        // Closable from here too: a refused task that turns out to be done should not have to be
+        // resumed first just to be closed.
+        if (isPlainTask) {
+            primaryActions.push(close);
+        }
     }
 
     if (primaryActions.length === 0 && decisionActions.length === 0 && !showPreview) {
@@ -301,7 +336,9 @@ function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Rea
             <div className="task-board__actions-row">
                 {primaryActions.map(action => (
                     <Button
-                        key={action.mutation}
+                        /* Keyed by label, not by mutation: Start, Refuse and Close all go
+                           through updateTaskState, so the mutation is no longer unique in a row. */
+                        key={action.label}
                         label={action.label}
                         size="small"
                         isDisabled={isBusy}

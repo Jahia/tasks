@@ -44,6 +44,7 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
                     owner
                     assigneeDisplayName
                     state
+                    taskType
                     possibleOutcomes
                     description
                     workflowSummary
@@ -89,6 +90,7 @@ export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
                     owner
                     assigneeDisplayName
                     state
+                    taskType
                     possibleOutcomes
                     description
                     workflowSummary
@@ -174,6 +176,9 @@ export type TaskBoardNode = {
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
+    // "jnt:task" or "jnt:workflowTask" -- which decides whether the task can be closed by
+    // writing state=finished, or has to go through its workflow outcome. See TaskActions.
+    taskType: string | null;
     possibleOutcomes: string[];
     description: string | null;
     workflowSummary: string | null;
