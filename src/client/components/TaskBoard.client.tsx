@@ -166,16 +166,54 @@ function jcontentLanguage(): string {
 }
 
 /**
- * Where the button sends somebody, as a jContent location.
+ * One string, rison-encoded, the way jContent's URL hash wants it.
  *
- * <p>Content in a page opens the pages accordion on the page that holds it; content in a folder
- * opens the content-folders accordion on the folder that holds it. Either way jContent lists the
- * location's children, so the content is in front of the reader with its own actions on the row.
+ * Rison is what jContent reads its hash with (rison-node, via ContentEditorApi's
+ * rison.decode_uri). Only the one shape this file produces is handled here -- a flat object of
+ * string and boolean values inside a one-element list -- rather than pulling in the package for a
+ * single URL that a dashboard island builds once.
  *
- * Not Content Editor, though that is the obvious destination for a standalone item: the editor is
- * reached through a React context that only jContent's own tree provides (its exported
- * ContentEditorApiContextProvider supplies an empty object), and no URL opens it. From the
- * dashboard, landing on the item is as close as this can get.
+ * Strings are always quoted, even where rison would allow a bare identifier: a uuid beginning with
+ * a digit may NOT be bare (rison's not_idstart is "-0123456789"), and quoting everything removes
+ * the case analysis. Inside a quoted string rison escapes ' and ! with a leading !.
+ */
+const risonString = (value: string) => `'${value.replace(/(['!])/g, '!$1')}'`;
+
+/**
+ * The hash that makes jContent open Content Editor on one node as it loads.
+ *
+ * ContentEditorApi keeps its open editors in the URL hash and reads them back on mount, so a
+ * config put there by somebody else opens the same editor - which is how this board reaches an
+ * editor that is otherwise only available through a React context inside jContent's own tree.
+ * The keys are the ones useEdit() builds: uuid, lang, mode ("edit", ContentEditor.constants'
+ * baseEditRoute) and isFullscreen.
+ *
+ * Every character this produces -- ( ) : , ! ' and the uuid's own hyphens -- is in rison's uri_ok
+ * set, so its encode_uri is the identity here and the string needs no further escaping.
+ */
+function contentEditorHash(uuid: string, language: string): string {
+    const config = [
+        'isFullscreen:!t',
+        `lang:${risonString(language)}`,
+        `mode:${risonString('edit')}`,
+        `uuid:${risonString(uuid)}`
+    ].join(',');
+    return `#(contentEditor:!((${config})))`;
+}
+
+/**
+ * Where the button sends somebody: Content Editor, open on the target itself.
+ *
+ * <p>The path is still the LOCATION rather than the node - the page that holds the content, or the
+ * folder it sits in - so that closing the editor leaves the reader looking at the content among
+ * its siblings, with its own row actions, instead of somewhere they never chose to be. The node
+ * itself is named in the hash (see contentEditorHash).
+ *
+ * <p>This used to be the location alone, on the belief that no URL could open Content Editor. That
+ * was wrong: the context is indeed unreachable from a dashboard module, but ContentEditorApi also
+ * takes its editors from the hash, which anybody can write. Verified against the running site --
+ * /jahia/jcontent/luxe/en/pages/home plus a hash naming the "life-style" section opened the
+ * editor on that section, title field and all.
  *
  * The site comes out of the path rather than from context, because the board is a dashboard screen
  * with no site of its own and a task may point anywhere.
@@ -188,7 +226,8 @@ function locationUrl(target: TaskTarget, language: string): {url: string; site: 
 
     const [, site, rest] = match;
     const mode = target.inPage ? 'pages' : 'content-folders';
-    return {site, mode, url: `/jahia/jcontent/${site}/${language}/${mode}${rest ?? ''}`};
+    const location = `/jahia/jcontent/${site}/${language}/${mode}${rest ?? ''}`;
+    return {site, mode, url: `${location}${contentEditorHash(target.uuid, language)}`};
 }
 
 /**
