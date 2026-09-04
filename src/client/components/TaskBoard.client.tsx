@@ -555,7 +555,10 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
                                 <Typography component="span" variant="caption" weight="light">
                                     {target.typeName}
                                 </Typography>
-                                {location && (
+                                {/* No Edit on a closed task: the content is still named, because
+                                    that is the record of what the work was about, but there is
+                                    nothing left to do to it from here. The live cards keep it. */}
+                                {location && !isClosed && (
                                     <Button
                                         size="default"
                                         variant="outlined"
@@ -563,8 +566,17 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
                                         data-sel-role="target-edit"
                                         data-sel-target-in-page={String(target.inPage)}
                                         onClick={() => {
+                                            // A new tab, not this one: the board is a working list
+                                            // somebody is going down, and editing one item should
+                                            // not cost them their place in it -- there are usually
+                                            // several tasks to get through, and often several
+                                            // targets on one task.
+                                            //
+                                            // preferListView writes localStorage, which the new tab
+                                            // reads from the same origin, so it still decides what
+                                            // is behind the editor once it is closed there.
                                             preferListView(location.site, location.mode);
-                                            window.location.assign(location.url);
+                                            window.open(location.url, '_blank', 'noopener');
                                         }}
                                     />
                                 )}
