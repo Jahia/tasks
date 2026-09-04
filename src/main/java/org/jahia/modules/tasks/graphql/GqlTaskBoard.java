@@ -260,7 +260,10 @@ public class GqlTaskBoard {
             if (!node.hasProperty("targetNode")) {
                 return null;
             }
-            JCRNodeWrapper target = (JCRNodeWrapper) node.getProperty("targetNode").getNode();
+            JCRNodeWrapper target = resolveTargetNode(node);
+            if (target == null) {
+                return null;
+            }
             JCRNodeWrapper renderable = isRenderablePage(target) ? target : findContainingPage(target);
             if (renderable == null) {
                 renderable = target;
@@ -279,6 +282,29 @@ public class GqlTaskBoard {
         } catch (RepositoryException e) {
             throw new TaskGraphQLException("Unable to resolve task target node", e);
         }
+    }
+
+    // jnt:task#targetNode is MULTI-VALUED in the live definition -- a task legitimately references
+    // several nodes (e.g. the two content items listed in the luxe demo's "revoie les textes" task),
+    // even though this module's own definitions.cnd declares it single-valued. Property#getNode()
+    // therefore throws ValueFormatException ("can only be retrieved as an array") and, because the
+    // board surfaces any GraphQL error as fatal, a single such task blanks the whole screen.
+    // Resolves the first target that still exists; the board only needs one renderable page.
+    private static JCRNodeWrapper resolveTargetNode(JCRNodeWrapper task) throws RepositoryException {
+        if (!task.getProperty("targetNode").isMultiple()) {
+            return (JCRNodeWrapper) task.getProperty("targetNode").getNode();
+        }
+
+        JCRSessionWrapper session = task.getSession();
+        for (Value value : task.getProperty("targetNode").getValues()) {
+            try {
+                return (JCRNodeWrapper) session.getNodeByIdentifier(value.getString());
+            } catch (ItemNotFoundException e) {
+                // Stale weak reference -- try the next target rather than failing the board.
+            }
+        }
+
+        return null;
     }
 
     private static boolean isRenderablePage(JCRNodeWrapper node) throws RepositoryException {
