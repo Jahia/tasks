@@ -29,6 +29,44 @@
     gap: var(--spacing-medium);
 }
 
+/* The count and the three list badges, which read as one sentence: "5 task(s), assigned to me". */
+.task-board__scopes {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--spacing-small);
+}
+
+/* A real button rather than a Chip: this is a control, and a Chip is a div - no keyboard focus,
+   no pressed state. The pill look is Chip's, so the two still read as the same kind of object. */
+.task-board__scope {
+    padding: 2px var(--spacing-small);
+    border: 1px solid var(--color-gray_light);
+    border-radius: 12px;
+    background-color: transparent;
+    color: var(--color-gray_dark);
+    font: inherit;
+    font-size: var(--fontSize-caption, 12px);
+    cursor: pointer;
+}
+
+.task-board__scope:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+/* Filled rather than merely outlined: which list is showing has to be readable at a glance from
+   across the toolbar, and a border-colour change alone is not. */
+.task-board__scope--selected {
+    border-color: var(--color-accent);
+    background-color: var(--color-accent);
+    color: var(--color-light);
+}
+
+.task-board__scope--selected:hover {
+    color: var(--color-light);
+}
+
 .task-board__toolbar-controls {
     display: flex;
     align-items: center;

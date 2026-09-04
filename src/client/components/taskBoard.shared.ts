@@ -26,9 +26,56 @@ export const NOT_FINISHED_STATES = ['active', 'started', 'suspended'];
 export const DEFAULT_SORT_BY = 'jcr:created';
 export const DEFAULT_SORT_ORDER = 'ascending';
 
+// The three lists the board offers, in the order they are shown. The screen is called "My Tasks",
+// so the default is the narrow reading of that: what is actually assigned to the viewer. The other
+// two answer the questions that reading leaves open -- what did I hand out, and what could I pick
+// up -- and each is a separate list rather than an extra column, because they overlap: a task I
+// created and then assigned to myself belongs in two of them.
+//
+// The values are the server's own scope strings (see TaskBoardQueryExtensions#appendScopeFilter),
+// so the filtering happens in the JCR query and the count beside these badges is the real total
+// for the selected list, not a filtered page.
+export type TaskScope = 'assignedToMe' | 'createdByMe' | 'claimable';
+
+export const TASK_SCOPES: Array<{label: string; value: TaskScope}> = [
+    {label: 'Assigned to me', value: 'assignedToMe'},
+    {label: 'Tasks I\'ve created', value: 'createdByMe'},
+    // Unassigned and offered to the viewer, usually through one of their groups -- which is how
+    // workflow tasks arrive. Taking one is the "Assign to me" action already on the card.
+    {label: 'Tasks I can take', value: 'claimable'}
+];
+
+export const DEFAULT_SCOPE: TaskScope = 'assignedToMe';
+
+// What an empty board means, which depends entirely on which list is showing.
+export const EMPTY_SCOPE_MESSAGE: Record<TaskScope, string> = {
+    assignedToMe: 'No task is assigned to you.',
+    createdByMe: 'You have not created any task.',
+    claimable: 'There is no task waiting to be taken.'
+};
+
+/**
+ * The variables the FIRST page is fetched with, by the two places that fetch it before TaskBoard
+ * exists to fetch it itself: the SSR content view (CurrentUserTasksView.server.tsx) and the
+ * dashboard route (TasksDashboardApp.tsx).
+ *
+ * Shared rather than written out twice, because every value here has to agree with TaskBoard's
+ * own initial state -- and a value that disagrees does not fail, it renders one list and then
+ * silently replaces it with another as soon as the island's first re-fetch lands. That is exactly
+ * what happened when `scope` was added and only one of the two call sites was updated: the board
+ * arrived showing every task with "Assigned to me" selected.
+ */
+export const initialBoardVariables = (pageSize: number) => ({
+    first: pageSize,
+    filterState: NOT_FINISHED_STATES,
+    sortBy: DEFAULT_SORT_BY,
+    sortOrder: DEFAULT_SORT_ORDER,
+    scope: DEFAULT_SCOPE
+});
+
 export const TASK_BOARD_QUERY = /* GraphQL */ `
-    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String]) {
-        taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState) {
+    query TaskBoard($first: Int!, $after: String, $search: String, $sortBy: String, $sortOrder: String, $filterState: [String], $scope: String) {
+        taskBoard(first: $first, after: $after, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, filterState: $filterState, scope: $scope) {
             pageInfo {
                 hasNextPage
                 endCursor
@@ -73,8 +120,8 @@ export const TASK_BOARD_QUERY = /* GraphQL */ `
 // client island needs for its action-menu display logic (see
 // TaskBoardQueryExtensions#taskBoardCurrentUserKey/#taskBoardCanReviewAll).
 export const INITIAL_TASK_BOARD_QUERY = /* GraphQL */ `
-    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String) {
-        taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder) {
+    query InitialTaskBoard($first: Int!, $filterState: [String], $sortBy: String, $sortOrder: String, $scope: String) {
+        taskBoard(first: $first, filterState: $filterState, sortBy: $sortBy, sortOrder: $sortOrder, scope: $scope) {
             pageInfo {
                 hasNextPage
                 endCursor

@@ -9,15 +9,18 @@ import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
+    DEFAULT_SCOPE,
     DEFAULT_SORT_BY,
     DEFAULT_SORT_ORDER,
+    EMPTY_SCOPE_MESSAGE,
     NOT_FINISHED_STATES,
     RESUME_TASK_MUTATION,
     SUSPEND_TASK_MUTATION,
     TASK_BOARD_QUERY,
+    TASK_SCOPES,
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
-import type {TaskBoardConnection, TaskBoardNode, TaskTarget} from './taskBoard.shared';
+import type {TaskBoardConnection, TaskBoardNode, TaskScope, TaskTarget} from './taskBoard.shared';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
@@ -494,6 +497,9 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     // comment for why: the sort-by dropdown always needs a real value to display.
     const [sortBy, setSortBy] = useState<SortField>(DEFAULT_SORT_BY as SortField);
     const [sortOrder, setSortOrder] = useState<SortDirection>(DEFAULT_SORT_ORDER as SortDirection);
+    // Which of the three lists is showing (see TASK_SCOPES). Single-select: they are alternative
+    // answers to "which tasks", not filters that stack.
+    const [scope, setScope] = useState<TaskScope>(DEFAULT_SCOPE);
     // Relay-style cursor pagination only supports moving forward one page at a
     // time; this caches the cursor needed to fetch each page once it has been
     // reached, so navigating back to an already-visited page doesn't require
@@ -521,7 +527,8 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
                 search: search === '' ? null : search,
                 sortBy,
                 sortOrder,
-                filterState: NOT_FINISHED_STATES
+                filterState: NOT_FINISHED_STATES,
+                scope
             });
             setConnection(data.taskBoard);
             setCurrentPage(page);
@@ -530,10 +537,10 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, itemsPerPage, search, sortBy, sortOrder]);
+    }, [graphqlEndpoint, itemsPerPage, search, sortBy, sortOrder, scope]);
 
-    // itemsPerPage/search/sortBy/sortOrder all change what the *first* page even means, so none
-    // of them can be applied by just re-fetching the current page -- every cached cursor is
+    // itemsPerPage/search/sortBy/sortOrder/scope all change what the *first* page even means, so
+    // none of them can be applied by just re-fetching the current page -- every cached cursor is
     // invalidated and this always jumps back to page 1. Skipped on mount: initialConnection
     // already is page 1 at the (unchanged) defaults.
     const isInitialMount = useRef(true);
@@ -545,10 +552,10 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
 
         cursorsByPage.current = new Map([[1, undefined]]);
         loadPage(1);
-        // Deliberately reacts only to itemsPerPage/search/sortBy/sortOrder: loadPage already
-        // closes over all four (declared above) plus graphqlEndpoint/currentPage, which this
+        // Deliberately reacts only to itemsPerPage/search/sortBy/sortOrder/scope: loadPage already
+        // closes over all five (declared above) plus graphqlEndpoint/currentPage, which this
         // effect doesn't care about.
-    }, [itemsPerPage, search, sortBy, sortOrder]);
+    }, [itemsPerPage, search, sortBy, sortOrder, scope]);
 
     const handlePageChange = (nextPage: number) => {
         // Clamp forward jumps to one page at a time -- see the cursor cache
@@ -578,7 +585,9 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
     if (isLoading) {
         boardContent = <Loader/>;
     } else if (rows.length === 0) {
-        boardContent = <EmptyData message="No tasks to show."/>;
+        // A search that found nothing is a different situation from a list that is simply empty,
+        // and saying "no task is assigned to you" while a search term is in the box would be wrong.
+        boardContent = <EmptyData message={search === '' ? EMPTY_SCOPE_MESSAGE[scope] : 'No task matches this search.'}/>;
     } else {
         boardContent = (
             <div className="task-board__list">
@@ -607,7 +616,22 @@ export default function TaskBoard({initialConnection, graphqlEndpoint, currentUs
             content={(
                 <div className="task-board__content">
                     <div className="task-board__toolbar">
-                        <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
+                        <div className="task-board__scopes" role="group" aria-label="Which tasks to show">
+                            <Typography variant="caption" weight="light">{connection.pageInfo.totalCount} task(s)</Typography>
+                            {TASK_SCOPES.map(option => (
+                                <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`task-board__scope${scope === option.value ? ' task-board__scope--selected' : ''}`}
+                                    // aria-pressed rather than aria-selected: these are toggle
+                                    // buttons in a group, not tabs over one panel of content.
+                                    aria-pressed={scope === option.value}
+                                    onClick={() => setScope(option.value)}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
                         <div className="task-board__toolbar-controls">
                             <div className="task-board__sort">
                                 <Typography variant="body" weight="semiBold">Sort by:</Typography>
