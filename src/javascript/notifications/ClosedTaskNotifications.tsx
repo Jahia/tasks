@@ -14,9 +14,9 @@ import type {ClosedTaskAlert, ClosedTaskAlertsResult} from '../../client/lib/clo
 // buildEndpointUrl() to be had here, and a plain relative path resolves from the shell.
 const GRAPHQL_ENDPOINT = '/modules/graphql';
 
-// Where the profile icon's notifications live -- the dashboard's Tasks tab, which is what these
-// notifications are about.
-const TASKS_ROUTE = '/dashboard/tasks';
+// Where the profile icon's notifications live -- the Tasks entry behind that same icon, which is
+// what these notifications are about.
+const TASKS_ROUTE = '/profile/tasks';
 
 type NotificationItem = {
     id: string;

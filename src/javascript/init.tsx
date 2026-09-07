@@ -52,7 +52,7 @@ export default function initTasksAdminRoute() {
         targets: ['jahiaApp-init:6'],
         callback: () => {
             registry.addOrReplace('adminRoute', 'tasks', {
-                targets: ['dashboard:50'],
+                targets: ['profile:30'],
                 icon: <Task/>,
                 label: 'tasks:jnt_task.myTasks',
                 isSelectable: true,
