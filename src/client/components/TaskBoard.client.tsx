@@ -33,6 +33,7 @@ import type {
     TaskScope,
     TaskTarget
 } from './taskBoard.shared';
+import {announceCreatedListViewed, announceTaskClosed} from '../lib/closedTaskAlerts';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
@@ -841,6 +842,13 @@ export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserK
         setNotice(null);
         try {
             await callGraphQL(graphqlEndpoint, mutation, variables);
+            // The profile icon must not report a closure back to the person who performed it.
+            // Both routes to the terminal state: writing it directly (the Close button, and a
+            // drop into the Closed column) and a workflow decision.
+            if (mutation === COMPLETE_TASK_MUTATION || variables.state === CLOSED_STATE) {
+                announceTaskClosed(String(variables.id));
+            }
+
             await loadBoard();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to complete this action.');
@@ -892,6 +900,11 @@ export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserK
     const changeScope = (next: TaskScope) => {
         setScope(next);
         setLimits(DEFAULT_LIMITS);
+        // Opening this list puts every closed task the viewer raised on screen, in the Closed
+        // column -- which is exactly what the profile icon was pointing at, so it stops.
+        if (next === 'createdByMe') {
+            announceCreatedListViewed();
+        }
     };
 
     const changeSortBy = (next: SortField) => {

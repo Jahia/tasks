@@ -1,6 +1,7 @@
 import {registry} from '@jahia/ui-extender';
 import {Task} from '@jahia/moonstone';
 import {TasksDashboardApp} from './TasksDashboardApp';
+import {ClosedTaskNotifications} from './notifications/ClosedTaskNotifications';
 
 // window.jahia.i18n is set up by the app shell before any remote's init() runs (see e.g.
 // personal-api-tokens' own init.js), but @jahia/ui-extender's own Window.jahia type declares
@@ -56,6 +57,17 @@ export default function initTasksAdminRoute() {
                 label: 'tasks:jnt_task.myTasks',
                 isSelectable: true,
                 render: () => <TasksDashboardApp/>
+            });
+
+            // Tasks the viewer raised that somebody closed while they were elsewhere, shown
+            // as a count on the profile icon in the first-level menu. The type and target are
+            // jahia-user-entries' contract (its Profile/Notifications/Notifications.constants),
+            // named here as literals because a module cannot import from another module's
+            // bundle. That module registers at jahiaApp-init:5 and this runs at :6, so its
+            // provider is already in place by the time this entry is added.
+            registry.add('profile-notification', 'tasks-closed', {
+                targets: ['profile-notifications:10'],
+                component: ClosedTaskNotifications
             });
 
             console.debug('%c Tasks Engine Extensions is activated', 'color: #3c8cba');
