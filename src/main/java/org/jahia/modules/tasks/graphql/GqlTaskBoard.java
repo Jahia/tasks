@@ -58,6 +58,11 @@ public class GqlTaskBoard {
     // which the account-name lookups share -- see resolveCandidateDisplayName().
     private static final String DISPLAYABLE_NAME_MEMO_PREFIX = "displayable:";
 
+    // The one terminal state this board recognises, mirroring TaskBoardQueryExtensions' own
+    // constant -- declared again rather than shared, so neither class reaches into the other for
+    // a three-character string.
+    private static final String CLOSED_STATE = "finished";
+
     private final JCRNodeWrapper node;
 
     // Everything this row shares with the other rows of the same request: the viewer's expanded
@@ -247,6 +252,28 @@ public class GqlTaskBoard {
             // Same resilience as lookUpUserDisplayName: a value that doesn't resolve to a node
             // this viewer can read is shown verbatim rather than failing the whole row.
             return principalPath;
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("When the task was closed, as an ISO-8601 instant, or null if it is not closed. "
+            + "Normally the closedDate stamped by the mutation that finished it; for a task closed before "
+            + "that property existed, jcr:lastModified stands in -- the last thing to happen to a closed "
+            + "task is, in practice, its closing.")
+    public String getClosedDate() {
+        try {
+            if (!CLOSED_STATE.equals(node.getPropertyAsString("state"))) {
+                return null;
+            }
+
+            String property = node.hasProperty("closedDate") ? "closedDate" : "jcr:lastModified";
+            if (!node.hasProperty(property)) {
+                return null;
+            }
+
+            return node.getProperty(property).getDate().toInstant().toString();
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to read task closing date", e);
         }
     }
 

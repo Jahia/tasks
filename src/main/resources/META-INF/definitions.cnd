@@ -9,6 +9,10 @@
  - priority (string, choicelist[resourceBundle]) = 'normal' nofulltext analyzer='keyword' < 'low', 'normal', 'high'
  - dueDate (date, datetimepicker) = now('1000*60*60*24')
  - state (string, choicelist[resourceBundle]) = 'active' nofulltext analyzer='keyword' < 'active', 'started', 'finished', 'suspended', 'cancelled'
+// Stamped when a save leaves the task in 'finished', cleared when one takes it back out --
+// see TaskBoardMutationExtensions#stampClosedDate. Absent on a task closed before this property
+// existed, which is why GqlTaskBoard#getClosedDate falls back to jcr:lastModified.
+ - closedDate (date)
  - type (string)
  - possibleOutcomes (string) multiple
  - finalOutcome (string)

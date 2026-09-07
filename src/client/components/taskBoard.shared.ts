@@ -138,6 +138,7 @@ const TASK_CARD_FIELDS = /* GraphQL */ `
     title
     creator
     createdDate
+    closedDate
     dueDate
     owner
     assigneeDisplayName
@@ -268,6 +269,10 @@ export type TaskBoardNode = {
     title: string | null;
     creator: string | null;
     createdDate: string | null;
+    // When it reached "finished", or null while it has not. Server-side this is the stamped
+    // closedDate, standing in with jcr:lastModified for tasks closed before that property
+    // existed -- see GqlTaskBoard#getClosedDate.
+    closedDate: string | null;
     dueDate: string | null;
     owner: string | null;
     assigneeDisplayName: string | null;

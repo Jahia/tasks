@@ -16,6 +16,7 @@ import org.jahia.services.usermanager.JahiaUser;
 
 import javax.jcr.RepositoryException;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.List;
 
 /**
@@ -48,6 +49,9 @@ public final class TaskBoardMutationExtensions {
     private static final String STATE_SUSPENDED = "suspended";
     private static final String STATE_FINISHED = "finished";
     private static final String STATE_CANCELLED = "cancelled";
+
+    // See definitions.cnd; written and cleared by stampClosedDate alone.
+    private static final String PROPERTY_CLOSED_DATE = "closedDate";
 
     @GraphQLField
     @GraphQLDescription("Assign an active, not-yet-assigned-to-you task to yourself")
@@ -204,10 +208,34 @@ public final class TaskBoardMutationExtensions {
     private static void writeTask(JahiaUser user, String taskId, TaskWrite write) throws RepositoryException {
         JCRTemplate.getInstance().doExecuteWithSystemSessionAsUser(user, Constants.EDIT_WORKSPACE, null,
                 (JCRCallback<Void>) systemSession -> {
-                    write.apply(systemSession.getNodeByIdentifier(taskId));
+                    JCRNodeWrapper task = systemSession.getNodeByIdentifier(taskId);
+                    write.apply(task);
+                    stampClosedDate(task);
                     systemSession.save();
                     return null;
                 });
+    }
+
+    /**
+     * Keeps closedDate in step with state, for every write that goes through this class.
+     *
+     * <p>Here rather than in each mutation because "when was this closed" is a fact about the
+     * state property, not about the particular button that moved it: completeTask, updateTaskState
+     * and the unassign path can all leave a task finished or take it back out, and a rule spelled
+     * out in three places is one edit away from holding in only two.
+     *
+     * <p>Re-closing a reopened task re-stamps it, since reopening cleared the old value: the date
+     * always describes the closure the task is currently in, never an earlier one. The stamp is
+     * only ever written when there is none, so a save that touches an already-closed task -- an
+     * edited description, say -- does not silently move its closing date to today.
+     */
+    private static void stampClosedDate(JCRNodeWrapper task) throws RepositoryException {
+        boolean closed = STATE_FINISHED.equals(task.getPropertyAsString(PROPERTY_STATE));
+        if (closed && !task.hasProperty(PROPERTY_CLOSED_DATE)) {
+            task.setProperty(PROPERTY_CLOSED_DATE, Calendar.getInstance());
+        } else if (!closed && task.hasProperty(PROPERTY_CLOSED_DATE)) {
+            task.getProperty(PROPERTY_CLOSED_DATE).remove();
+        }
     }
 
     /**

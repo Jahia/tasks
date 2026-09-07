@@ -472,6 +472,7 @@ type TaskCardProps = {
 function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction, onDragStart, onDragEnd}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
+    const closedDate = formatCreatedDate(task.closedDate);
     const language = jcontentLanguage();
     const dueLabel = formatDueDate(task.dueDate);
     const tone = dueTone(task.dueDate);
@@ -514,7 +515,10 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
             <Typography component="p" variant="caption" weight="light" className="task-board__meta">
                 {[
                     `Created by: ${task.creator ?? 'Unknown'}${createdDate ? `, on ${createdDate}` : ''}`,
-                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`
+                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`,
+                    // Last, and only once there is one: the card reads in the order the task
+                    // lived -- raised, handed to somebody, done.
+                    ...(closedDate ? [`Closed on ${closedDate}`] : [])
                 ].join(' · ')}
             </Typography>
             <div className="task-board__card-header">
