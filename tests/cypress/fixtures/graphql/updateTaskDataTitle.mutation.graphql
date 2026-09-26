@@ -1,0 +1,5 @@
+mutation UpdateTaskDataTitle($id: String!, $title: String!) {
+    updateTaskDataTitle(id: $id, title: $title) {
+        uuid
+    }
+}

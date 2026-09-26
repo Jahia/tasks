@@ -52,6 +52,21 @@ jobs:
           dependencytrack_apikey: ${{ secrets.DEPENDENCYTRACK_APIKEY }}
           sbom_artifacts: 'build-artifacts'
 
+  integration-tests-standalone:
+    name: Integration Tests (Standalone)
+    needs: build
+    secrets: inherit
+    uses: Jahia/jahia-modules-action/.github/workflows/reusable-integration-tests.yml@v2
+    with:
+      module_id: tasks
+      module_branch: ${{ github.ref }}
+      testrail_project: Tasks Module
+      jahia_image: ghcr.io/jahia/jahia-ee-dev:8-SNAPSHOT
+      should_skip_testrail: true
+      provisioning_manifest: provisioning-manifest-build.yml
+      artifact_prefix: tasks-standalone-artifacts
+      timeout_job: 45
+
   publish:
     name: Publish module
     needs: build

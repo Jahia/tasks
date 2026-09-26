@@ -1,6 +1,21 @@
 /.idea
 *.iml
+.vscode
 target
 .DS_Store
 /.classpath
 /.project
+node
+node_modules
+src/main/resources/javascript/apps
+# Module Federation scratch files written next to the sources by @module-federation/vite (the
+# federation remote build, see vite.config.mjs) -- currently .__mf__temp/, but the
+# generated names have already moved once between plugin versions, so match the family. Kept in
+# sync with eslint.config.js, which has to ignore the same tree: it is generated JS, and it does
+# not pass this project's lint.
+.__*
+*.tgz
+yarn-error.log
+gc-*.log
+os-container-pagesize-*.log
+safepoints-*.log

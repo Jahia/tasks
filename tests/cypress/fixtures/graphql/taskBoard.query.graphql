@@ -1,0 +1,65 @@
+# Every field the React board actually asks for (see TASK_BOARD_PAGE_SELECTION in
+# src/client/components/taskBoard.shared.ts), plus possibleOutcomes, which only the tests need -- so
+# a server-side change that breaks the board's own selection breaks this suite too, rather than
+# passing against a narrower query no client ever sends.
+query TaskBoard(
+    $first: Int!
+    $after: String
+    $search: String
+    $sortBy: String
+    $sortOrder: String
+    $filterState: [String]
+    $scope: String
+    $language: String
+) {
+    taskBoard(
+        first: $first
+        after: $after
+        search: $search
+        sortBy: $sortBy
+        sortOrder: $sortOrder
+        filterState: $filterState
+        scope: $scope
+    ) {
+        pageInfo {
+            hasNextPage
+            endCursor
+            totalCount
+        }
+        edges {
+            node {
+                id
+                title
+                creator
+                createdDate
+                owner
+                assigneeDisplayName
+                state
+                dueDate
+                priority
+                taskType
+                viewerRole
+                isAssignableToMe
+                candidateDisplayNames
+                possibleOutcomes
+                possibleOutcomeDetails(language: $language) {
+                    name
+                    displayLabel
+                }
+                description
+                workflowSummary
+                simpleWorkflowTaskData {
+                    id
+                    comment
+                }
+                targetNode {
+                    url
+                    path
+                    property(name: "jcr:title") {
+                        value
+                    }
+                }
+            }
+        }
+    }
+}

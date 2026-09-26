@@ -1,0 +1,85 @@
+{
+  "name": "tasks",
+  "version": "9.0.0-SNAPSHOT",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "clean": "rm -rf src/main/resources/javascript/apps/",
+    "dev": "vite build --watch",
+    "lint": "eslint ."
+  },
+  "_comment-dependencies": [
+    "This split is NOT the usual runtime-vs-tooling one, and moving a package across it changes",
+    "what the browser runs. @jahia/vite-federation-plugin turns every key of \"dependencies\" into",
+    "a module-federation SHARE (see vite.config.mjs), i.e. a package the app shell is expected to",
+    "hand us at runtime; everything else is bundled privately. So \"dependencies\" here means",
+    "\"provided by the app shell\", not \"needed at runtime\".",
+    "Each of the four is one the shell really does publish (verified against jahia-ui-root's own",
+    "remoteEntry.js: @apollo/client 3.14.0, react 18.3.1, react-dom 18.3.1, @jahia/ui-extender).",
+    "Declaring a share the shell does NOT publish is worse than not sharing it -- graphql and",
+    "graphql-tag are deliberately absent for that reason; `gql` comes from @apollo/client itself.",
+    "@jahia/moonstone and @jahia/moonstone-alpha therefore sit in devDependencies on purpose: the",
+    "shell only publishes Moonstone 2.14.2, which exports neither Banner, DataTable nor EmptyData,",
+    "so the board cannot use the shell's copy and must bundle its own -- privately, see the crash",
+    "described in the fix commit for #61.",
+    "The version RANGE here does not reach the share runtime: the plugin emits the INSTALLED",
+    "version as requiredVersion, and the version this module advertises is pinned to 0.0.0 in",
+    "vite.config.mjs so it can never win singleton negotiation. Read the note there before",
+    "changing any of this.",
+    "graphql itself sits in devDependencies, not dependencies, and that is deliberate: @apollo/client's",
+    "`gql` parses through it so it IS needed at runtime, but the shell does not publish it, so",
+    "declaring it a share would register one nothing can satisfy. devDependencies means it is",
+    "bundled privately instead -- the same choice content-versioning makes."
+  ],
+  "_comment-toolchain-pins": [
+    "vite, @jahia/vite-federation-plugin and the @module-federation/vite resolution below are",
+    "pinned to EXACT versions, and they are pinned together: this trio is the toolchain",
+    "formidable-engine ships, and it is the only combination proven to bridge Jahia's webpack-5",
+    "app shell. Do not float them.",
+    "@module-federation/vite <= 1.14 emits share stubs that TOP-LEVEL AWAIT the federation",
+    "runtime (`await runtimeInit.then(rt => rt.loadShare('react', ...))`), so nothing touches a",
+    "shared module before the host's share scope has actually been bridged. From 1.16 it emits a",
+    "SYNCHRONOUS globalThis.__mf_module_cache__ probe instead, which cannot wait for an async",
+    "bridge and takes the whole Jahia UI down at boot (see the fix commit for #61).",
+    "That rewrite is not gratuitous: rolldown, which is Vite 8's bundler, REFUSES the awaiting",
+    "form -- `vite build` fails with [REQUIRE_TLA] because react/cjs/react-jsx-runtime.production",
+    ".min.js reaches the stub through a CommonJS require(). So the safe stub requires Vite 7, and",
+    "Vite 8 requires the unsafe stub; the two pins are one decision, not two. Revisit only when a",
+    "@module-federation/vite release resolves shares asynchronously under rolldown as well."
+  ],
+  "dependencies": {
+    "@apollo/client": "^3.14.0",
+    "@jahia/ui-extender": "^1.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@jahia/moonstone": "^2.20.3",
+    "@jahia/moonstone-alpha": "^1.0.1",
+    "@jahia/vite-federation-plugin": "0.1.1",
+    "@types/react": "^18.3.28",
+    "@types/react-dom": "^18.3.7",
+    "eslint": "^9.39.2",
+    "graphql": "^16.14.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "7.3.5"
+  },
+  "packageManager": "yarn@1.22.22",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "jahia": {
+    "snapshot": true,
+    "module-dependencies": "default",
+    "module-type": "system",
+    "remotes": {
+      "jahia": "javascript/apps/remoteEntry.js"
+    }
+  },
+  "resolutions": {
+    "@module-federation/vite": "1.12.3"
+  }
+}

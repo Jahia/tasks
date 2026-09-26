@@ -1,0 +1,25 @@
+mutation CreateTask(
+    $parentPath: String!
+    $taskType: String
+    $title: String!
+    $description: String
+    $priority: String
+    $assigneeUserKey: String
+    $dueDate: String
+) {
+    createTask(
+        parentPath: $parentPath
+        taskType: $taskType
+        title: $title
+        description: $description
+        priority: $priority
+        assigneeUserKey: $assigneeUserKey
+        dueDate: $dueDate
+    ) {
+        id
+        title
+        state
+        priority
+        description
+    }
+}

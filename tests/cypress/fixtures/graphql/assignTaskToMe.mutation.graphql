@@ -1,0 +1,7 @@
+mutation AssignTaskToMe($id: String!) {
+    assignTaskToMe(id: $id) {
+        id
+        owner
+        state
+    }
+}

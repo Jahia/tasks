@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <content xmlns:j="http://www.jahia.org/jahia/1.0" xmlns:jcr="http://www.jcp.org/jcr/1.0">
     <modules jcr:primaryType="jnt:modules">
-        <tasks j:dependencies="default userDashboard"
+        <tasks j:dependencies="default graphql-dxm-provider"
                j:installedModules="tasks"
                j:modulePriority="0"
                j:moduleType="module"
@@ -46,7 +46,6 @@
                                                   displayState="true"
                                                   filterOnAssignee="assignedToMeOrUnassigned"
                                                   filterOnStates="active started suspended"
-                                                  j:view="bootstrapTasks"
                                                   jcr:mixinTypes="jmix:renderable"
                                                   jcr:primaryType="jnt:currentUserTasks"
                                                   sortBy="jcr:created"/>
@@ -77,7 +76,6 @@
                                                   displayState="true"
                                                   filterOnAssignee="assignedToMeOrUnassigned"
                                                   filterOnStates="active started suspended"
-                                                  j:view="settingsBootstrap3GoogleMaterialStyle"
                                                   jcr:mixinTypes="jmix:renderable"
                                                   jcr:primaryType="jnt:currentUserTasks"
                                                   sortBy="jcr:created"/>

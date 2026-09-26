@@ -47,6 +47,16 @@ rule "A task has been created"
 end
 */
 
+rule "The tasks dashboard tile is materialized for a new user"
+    when
+        A new node is created
+		- the node has the type jnt:user
+		- its name is not guest
+    then
+        Log "Materializing the tasks dashboard tile for new user: " + node.getName()
+>       tasks.materializeDashboardTile(node);
+end
+
 rule "A workflow task has been assigned"
     when
         Not in operation import
@@ -61,4 +71,20 @@ rule "A workflow task has been completed"
 >		property : ChangedPropertyFact ( name == "state" , stringValue == "finished" , node : node, node.types contains "jnt:workflowTask" )
     then
 >       tasks.completeTask(node,user.getJahiaUser());
+end
+
+// PO-trial 2026-08 (#65): a jnt:task created or edited through the standard content UI sets the
+// "assignee" reference that definitions.cnd now exposes there, while everything else in this
+// module -- the board's Owner column, its mutations, TaskAuthorizationService -- reads the
+// "assigneeUserKey" path. This keeps the two in step for manual tasks. Deliberately keyed on the
+// assignee property, which no workflow-created task ever writes (core assigns through
+// assigneeUserKey, see the rule above), so this never fires for a jnt:workflowTask in practice
+// even though that type inherits the property. Revert = delete this rule and the
+// Tasks#mirrorAssigneeToUserKey method it calls.
+rule "PO-trial 2026-08: a manual task's assignee reference is mirrored onto assigneeUserKey"
+    when
+        Not in operation import
+>		property : ChangedPropertyFact ( name == "assignee" , node : node, node.types contains "jnt:task" )
+    then
+>       tasks.mirrorAssigneeToUserKey(node);
 end

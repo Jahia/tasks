@@ -8,9 +8,7 @@
         <property name="globalRulesObject">
             <map>
                 <entry key="tasks">
-                    <bean class="org.jahia.modules.tasks.rules.Tasks" factory-method="getInstance">
-                        <property name="taskService" ref="org.jahia.services.tasks.TaskService"/>
-                    </bean>
+                    <bean class="org.jahia.modules.tasks.rules.Tasks" factory-method="getInstance"/>
                 </entry>
             </map>
         </property>

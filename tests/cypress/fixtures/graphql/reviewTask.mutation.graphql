@@ -1,0 +1,7 @@
+mutation ReviewTask($id: String!, $outcome: String!) {
+    reviewTask(id: $id, outcome: $outcome) {
+        id
+        state
+        owner
+    }
+}
