@@ -177,7 +177,7 @@
                             - <span><a href="<c:url value='${url.base}${displayableNode.path}.html'/>">${displayableNode.displayableName}</a></span>
                         </c:if>
                         <div style="display:none;" class="taskdetail" id="taskdetail_${task.identifier}">
-                            <p class="task-info-p"><fmt:message key="label.createdBy"/>: ${task.properties['jcr:createdBy'].string}, <fmt:message key="label.createdOn"/> <fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></p>
+                            <p class="task-info-p"><fmt:message key="label.createdBy"/>: ${fn:escapeXml(task.properties['jcr:createdBy'].string)}, <fmt:message key="label.createdOn"/> <fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></p>
                             <c:if test="${not empty task.properties['priority']}"><p class="task-priority-p"><fmt:message key="jnt_task.priority"/>: <span class="task-priority task-${task.properties['priority'].string}"><jcr:nodePropertyRenderer node="${task}" name="priority" renderer="resourceBundle"/></span></p></c:if>
                             <c:if test="${not empty task.properties['description']}"><p class="task-text">${fn:escapeXml(task.properties['description'].string)}</p></c:if>
                             <template:tokenizedForm>
@@ -262,10 +262,10 @@
                     </td>
                     <c:if test="${dispAssignee}"><td headers="Assigned">
                         <c:if test="${not empty currentNode.properties['assigneeUserKey'].string}">
-                            <jcr:node var="assigneeNode" path="${currentNode.properties['assigneeUserKey'].string}"/>${assigneeNode.name}
+                            <jcr:node var="assigneeNode" path="${currentNode.properties['assigneeUserKey'].string}"/>${fn:escapeXml(assigneeNode.name)}
                         </c:if>
                     </td></c:if>
-                    <c:if test="${dispCreator}"><td headers="CreatedBy">${task.properties['jcr:createdBy'].string}</td></c:if>
+                    <c:if test="${dispCreator}"><td headers="CreatedBy">${fn:escapeXml(task.properties['jcr:createdBy'].string)}</td></c:if>
                     <c:if test="${dispState}"><td class="center" headers="State">
                         <span class="task-status task-status-${taskStatus}"><fmt:message key="jnt_task.state.${taskStatus}"/></span>
 
