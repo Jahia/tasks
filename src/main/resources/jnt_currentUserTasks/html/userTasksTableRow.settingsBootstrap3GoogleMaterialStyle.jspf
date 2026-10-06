@@ -41,7 +41,7 @@
             </c:if>
             <div class="taskdetail" id="taskdetail_${task.identifier}" style="display:none">
                 <p>
-                    <em><fmt:message key="label.createdBy"/>: ${task.properties['jcr:createdBy'].string},&nbsp;<fmt:message key="label.createdOn"/>&nbsp;<fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></em>
+                    <em><fmt:message key="label.createdBy"/>: ${fn:escapeXml(task.properties['jcr:createdBy'].string)},&nbsp;<fmt:message key="label.createdOn"/>&nbsp;<fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></em>
                 </p>
                 <c:if test="${not empty task.properties['priority']}">
                     <p><fmt:message key="jnt_task.priority"/>:
@@ -160,13 +160,13 @@
             <td headers="Assigned">
                 <c:if test="${not empty task.properties['assigneeUserKey'].string}">
                     <jcr:node var="assigneeNode" path="${task.properties['assigneeUserKey'].string}"/>
-                    ${assigneeNode.name}
+                    ${fn:escapeXml(assigneeNode.name)}
                 </c:if>
             </td>
         </c:if>
         <c:if test="${dispCreator}">
             <td headers="CreatedBy">
-                    ${task.properties['jcr:createdBy'].string}
+                    ${fn:escapeXml(task.properties['jcr:createdBy'].string)}
             </td>
         </c:if>
         <c:if test="${dispState}">
