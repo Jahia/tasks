@@ -33,9 +33,12 @@
     <c:set var="bindedComponent" value="${param['bindedComponent']}"/>
 </c:if>
 <c:if test="${currentResource.workspace eq 'live'}">
+    <c:url var="taskScheduleUrl" value="${url.basePreview}${currentNode.path}.html.ajax">
+        <c:param name="bindedComponent" value="${bindedComponent}"/>
+    </c:url>
     <div id="currentUserTasks${currentNode.identifier}">
         <script type="text/javascript">
-            $('#currentUserTasks${currentNode.identifier}').load('<c:url value="${url.basePreview}${currentNode.path}.html.ajax?bindedComponent=${bindedComponent}"/>');
+            $('#currentUserTasks${currentNode.identifier}').load('${functions:escapeJavaScript(taskScheduleUrl)}');
         </script>
     </div>
 </c:if>
