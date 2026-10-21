@@ -2,6 +2,7 @@ import {registry} from '@jahia/ui-extender';
 import {Task} from '@jahia/moonstone';
 import {TasksDashboardApp} from './TasksDashboardApp';
 import {ClosedTaskNotifications} from './notifications/ClosedTaskNotifications';
+import {AssignedTaskNotifications} from './notifications/AssignedTaskNotifications';
 
 // window.jahia.i18n is set up by the app shell before any remote's init() runs (see e.g.
 // personal-api-tokens' own init.js), but @jahia/ui-extender's own Window.jahia type declares
@@ -68,6 +69,14 @@ export default function initTasksAdminRoute() {
             registry.add('profile-notification', 'tasks-closed', {
                 targets: ['profile-notifications:10'],
                 component: ClosedTaskNotifications
+            });
+
+            // Tasks somebody else handed to the viewer that nobody has picked up yet: the other
+            // half of "what happened while you were away". Same contract as above; the two
+            // sources keep separate read states, and the profile icon counts both.
+            registry.add('profile-notification', 'tasks-assigned', {
+                targets: ['profile-notifications:5'],
+                component: AssignedTaskNotifications
             });
 
             console.debug('%c Tasks Engine Extensions is activated', 'color: #3c8cba');

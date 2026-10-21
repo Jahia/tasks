@@ -12,6 +12,8 @@
  * a module-level subscriber list would not.
  */
 
+import {readSeenTaskIds, rememberSeenTaskIds} from './seenTaskIds';
+
 /** How many closed tasks the notification can see at once -- the most recently closed N. */
 export const CLOSED_ALERTS_WINDOW = 100;
 
@@ -93,17 +95,11 @@ export function onTaskClosed(listener: (id: string) => void): () => void {
 }
 
 /*
- * -------------------------------------------------------------------------------------------
- * What this browser has already shown the reader.
- *
- * Per user key, not per browser profile: two people on one machine do not share a read/unread
- * state. Storage can throw outright rather than merely come back empty -- a browser set to block
- * site data raises on the accessor -- so every read and write is guarded and degrades to "no
- * notification" rather than taking the shell down with it.
- * -------------------------------------------------------------------------------------------
+ * What this browser has already shown the reader -- see seenTaskIds. The list name keeps the
+ * storage key this source has always used, so nobody's read state is lost.
  */
 
-const storageKey = (userKey: string) => `tasks-board-closed-seen-${userKey}`;
+const SEEN_LIST = 'closed';
 
 /**
  * How many ids are remembered. Larger than the window so ids marked seen one at a time -- a task
@@ -112,44 +108,8 @@ const storageKey = (userKey: string) => `tasks-board-closed-seen-${userKey}`;
  */
 const SEEN_MEMORY = 2 * CLOSED_ALERTS_WINDOW;
 
-/**
- * The ids already shown, or null if this browser has never recorded any.
- *
- * The null matters: on a first ever visit every task the reader ever closed would otherwise read
- * as news. Null means "start counting from now" (see newlyClosedTasks); an empty array means
- * "counting, nothing seen yet".
- */
-function readSeenClosedIds(userKey: string): string[] | null {
-    try {
-        const stored = window.localStorage.getItem(storageKey(userKey));
-        if (stored === null) {
-            return null;
-        }
-
-        const parsed: unknown = JSON.parse(stored);
-        return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Marks ids as seen, keeping the most recently marked SEEN_MEMORY of them. Re-marking moves an id
- * back to the end, so the ones met most recently are the last to be forgotten.
- */
 export function rememberSeenClosedIds(userKey: string, ids: string[]): void {
-    if (ids.length === 0) {
-        return;
-    }
-
-    const marked = new Set(ids);
-    const kept = (readSeenClosedIds(userKey) ?? []).filter(id => !marked.has(id));
-    try {
-        window.localStorage.setItem(storageKey(userKey), JSON.stringify([...kept, ...ids].slice(-SEEN_MEMORY)));
-    } catch {
-        // Nothing to do and nothing worth saying: the badge is a convenience, and a browser that
-        // will not store it still shows every task on the board.
-    }
+    rememberSeenTaskIds(SEEN_LIST, userKey, ids, SEEN_MEMORY);
 }
 
 /**
@@ -159,7 +119,7 @@ export function rememberSeenClosedIds(userKey: string, ids: string[]): void {
  * that forty tasks closed over the past year is not a notification, it is a wall.
  */
 export function newlyClosedTasks(userKey: string, closed: ClosedTaskAlert[]): ClosedTaskAlert[] {
-    const seen = readSeenClosedIds(userKey);
+    const seen = readSeenTaskIds(SEEN_LIST, userKey);
     if (seen === null) {
         rememberSeenClosedIds(userKey, closed.map(task => task.id));
         return [];

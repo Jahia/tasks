@@ -34,6 +34,7 @@ import type {
     TaskTarget
 } from './taskBoard.shared';
 import {announceCreatedListViewed, announceTaskClosed} from '../lib/closedTaskAlerts';
+import {announceTaskChanged} from '../lib/assignedTaskAlerts';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
@@ -849,6 +850,8 @@ export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserK
                 announceTaskClosed(String(variables.id));
             }
 
+            // Whatever changed, the count of tasks waiting on the viewer may have too.
+            announceTaskChanged();
             await loadBoard();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to complete this action.');

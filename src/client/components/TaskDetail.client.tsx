@@ -1,6 +1,7 @@
 import {useCallback, useState} from 'react';
 import {Banner, Button} from '@jahia/moonstone';
 import {callGraphQL} from '../lib/graphqlClient';
+import {announceTaskChanged} from '../lib/assignedTaskAlerts';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import type {TaskNode} from './task.shared';
 
@@ -20,6 +21,7 @@ export default function TaskDetail({task: initialTask, canModify, graphqlEndpoin
         setError(null);
         try {
             await callGraphQL(graphqlEndpoint, UPDATE_TASK_STATE_MUTATION, {id: task.id, state});
+            announceTaskChanged();
             setTask(current => ({...current, state}));
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Unable to update this task.');

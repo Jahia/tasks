@@ -35,7 +35,7 @@ type ClosedTaskNotificationsProps = {
  * Using it rather than useHistory keeps this component out of the router's tree, which is where
  * the notification provider mounts it -- and it degrades to a full page load if that ever moves.
  */
-function openTaskBoard(): void {
+export function openTaskBoard(): void {
     const jahia = (globalThis as unknown as {
         jahia?: {routerHistory?: {push: (path: string) => void}};
         contextJsParameters?: {contextPath?: string};
