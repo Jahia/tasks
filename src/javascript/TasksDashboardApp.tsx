@@ -14,10 +14,19 @@ const PAGE_SIZE = DEFAULT_PAGE_SIZE;
 // but a plain relative path resolves correctly from a route rendered in the browser.
 const GRAPHQL_ENDPOINT = '/modules/graphql';
 
+// The shell's i18next instance, which init.tsx asks to load this module's 'tasks' namespace
+// (src/main/resources/javascript/locales). Cast locally for the reason given in init.tsx.
+type ShellI18n = {
+    loadNamespaces: (namespace: string) => Promise<unknown>;
+    t: (key: string) => string;
+};
+const shellI18n = (): ShellI18n | undefined =>
+    (globalThis as unknown as {jahia?: {i18n?: ShellI18n}}).jahia?.i18n;
+
 type LoadState =
     | {status: 'loading'}
     | {status: 'error'; message: string}
-    | {status: 'ready'; data: InitialTaskBoardQueryResult};
+    | {status: 'ready'; data: InitialTaskBoardQueryResult; title: string};
 
 /**
  * Entry point for the 'tasks' adminRoute (see ../javascript/init.tsx), which overrides
@@ -32,11 +41,17 @@ export function TasksDashboardApp() {
 
     useEffect(() => {
         let cancelled = false;
-        callGraphQL<InitialTaskBoardQueryResult>(GRAPHQL_ENDPOINT, INITIAL_TASK_BOARD_QUERY,
-            initialBoardVariables(PAGE_SIZE))
-            .then(data => {
+        const i18n = shellI18n();
+        // The title waits for the translations as well as for the tasks, so the board never
+        // shows a raw key before its namespace has arrived.
+        Promise.all([
+            callGraphQL<InitialTaskBoardQueryResult>(GRAPHQL_ENDPOINT, INITIAL_TASK_BOARD_QUERY,
+                initialBoardVariables(PAGE_SIZE)),
+            i18n?.loadNamespaces('tasks')
+        ])
+            .then(([data]) => {
                 if (!cancelled) {
-                    setState({status: 'ready', data});
+                    setState({status: 'ready', data, title: i18n ? i18n.t('tasks:jnt_task.myTasks') : 'jnt_task.myTasks'});
                 }
             })
             .catch(e => {
@@ -59,6 +74,7 @@ export function TasksDashboardApp() {
 
     return (
         <TaskBoard
+            title={state.title}
             initialColumns={state.data}
             graphqlEndpoint={GRAPHQL_ENDPOINT}
             currentUserKey={state.data.taskBoardCurrentUserKey}

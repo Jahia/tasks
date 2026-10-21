@@ -74,6 +74,9 @@ const SORT_OPTIONS: Array<{label: string; value: SortField}> = [
 ];
 
 type TaskBoardProps = {
+    // Translated by whoever mounts the board -- this file is bundled for the browser by Vite as
+    // well as webpack, and neither bundle has a translation library of its own.
+    title: string;
     initialColumns: TaskBoardQueryResult;
     graphqlEndpoint: string;
     currentUserKey: string;
@@ -751,7 +754,7 @@ function BoardColumnView({
     );
 }
 
-export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
+export default function TaskBoard({title, initialColumns, graphqlEndpoint, currentUserKey, canReviewAll}: Readonly<TaskBoardProps>) {
     const [columns, setColumns] = useState(initialColumns);
     // How many rows each column is asking for. Per column, so "show more" on a long Closed list
     // does not also re-fetch the two beside it.
@@ -960,7 +963,7 @@ export default function TaskBoard({initialColumns, graphqlEndpoint, currentUserK
             paper
             header={(
                 <div style={{backgroundColor: 'white'}}>
-                    <Header title="Tasks"/>
+                    <Header title={title}/>
                 </div>
             )}
             content={(

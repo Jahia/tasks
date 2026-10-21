@@ -16,7 +16,7 @@ jahiaComponent(
         // Higher than the module's legacy .jsp default view, so this one wins.
         priority: 10
     },
-    () => {
+    (_props, {currentNode}) => {
         // Fetched here (SSR) rather than in the client island: useGQLQuery and
         // buildEndpointUrl are part of @jahia/javascript-modules-library, which
         // the client bundle is forbidden from importing at all. The island
@@ -38,6 +38,9 @@ jahiaComponent(
                 <Island
                     component={TaskBoard}
                     props={{
+                        // The component's own title, or else its type's label from the
+                        // JahiaTasks resource bundle, in the current language.
+                        title: currentNode.getDisplayableName(),
                         initialColumns: result,
                         graphqlEndpoint: buildEndpointUrl('/modules/graphql'),
                         currentUserKey: result.taskBoardCurrentUserKey,
