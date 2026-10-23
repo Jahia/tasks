@@ -7,6 +7,7 @@
 <%@ taglib prefix="uiComponents" uri="http://www.jahia.org/tags/uiComponentsLib" %>
 <%@ taglib prefix="user" uri="http://www.jahia.org/tags/user" %>
 <%@ taglib prefix="utility" uri="http://www.jahia.org/tags/utilityLib" %>
+<%@ taglib prefix="functions" uri="http://www.jahia.org/tags/functions" %>
 <%--@elvariable id="currentNode" type="org.jahia.services.content.JCRNodeWrapper"--%>
 <%--@elvariable id="propertyDefinition" type="org.jahia.services.content.nodetypes.ExtendedPropertyDefinition"--%>
 <%--@elvariable id="type" type="org.jahia.services.content.nodetypes.ExtendedNodeType"--%>
@@ -163,25 +164,26 @@
             <tbody>
             <c:forEach items="${moduleMap.currentList}"  var="task" varStatus="status" begin="${moduleMap.begin}" end="${moduleMap.end}">
                 <c:set var="taskStatus" value="${task.properties.state.string}"/>
+                <c:set var="taskPathJs" value="${functions:escapeJavaScript(task.path)}"/>
                 <tr class="${status.count % 2 == 0 ? 'odd' : 'even'}">
                     <td headers="Title">
                         <span class="icon-task icon-task-${task.properties['priority'].string}"></span>&nbsp;<span class="opentask" onclick="switchTaskDisplay('${task.identifier}')">${fn:escapeXml(task.displayableName)}</span>
                         <c:if test="${not empty task.properties['targetNode'].node}">
                             <c:set value="${jcr:findDisplayableNode(task.properties['targetNode'].node, renderContext)}" var="displayableNode"/>
                             <c:if test="${not empty displayableNode}">
-                                - <span><a href="<c:url value='${url.base}${displayableNode.path}.html'/>">${fn:escapeXml(task.properties["targetNode"].node.displayableName)}</a></span>
+                                - <span><a href="<c:url value='${url.base}${fn:escapeXml(displayableNode.path)}.html'/>">${fn:escapeXml(task.properties["targetNode"].node.displayableName)}</a></span>
                             </c:if>
                         </c:if>
                         <c:set value="${jcr:findDisplayableNode(task, renderContext)}" var="displayableNode"/>
                         <c:if test="${not empty displayableNode and not jcr:isNodeType(displayableNode, 'jnt:user')}">
-                            - <span><a href="<c:url value='${url.base}${displayableNode.path}.html'/>">${displayableNode.displayableName}</a></span>
+                            - <span><a href="<c:url value='${url.base}${fn:escapeXml(displayableNode.path)}.html'/>">${fn:escapeXml(displayableNode.displayableName)}</a></span>
                         </c:if>
                         <div style="display:none;" class="taskdetail" id="taskdetail_${task.identifier}">
                             <p class="task-info-p"><fmt:message key="label.createdBy"/>: ${fn:escapeXml(task.properties['jcr:createdBy'].string)}, <fmt:message key="label.createdOn"/> <fmt:formatDate value="${task.properties['jcr:created'].date.time}" dateStyle="long" type="both"/></p>
                             <c:if test="${not empty task.properties['priority']}"><p class="task-priority-p"><fmt:message key="jnt_task.priority"/>: <span class="task-priority task-${task.properties['priority'].string}"><jcr:nodePropertyRenderer node="${task}" name="priority" renderer="resourceBundle"/></span></p></c:if>
                             <c:if test="${not empty task.properties['description']}"><p class="task-text">${fn:escapeXml(task.properties['description'].string)}</p></c:if>
                             <template:tokenizedForm>
-                                <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.base}'/>${task.path}">
+                                <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.base}'/>${fn:escapeXml(task.path)}">
                                 </form>
                             </template:tokenizedForm>
                             <ul class="taskactionslist">
@@ -207,30 +209,30 @@
                                 </c:if>
                                 <c:choose>
                                     <c:when test="${taskStatus == 'active' and task.properties['assigneeUserKey'].string ne user.path and assignable eq 'true'}">
-                                        <li><a class="taskaction taskaction-assign" href="javascript:sendNewAssignee('${task.identifier}','${task.path}','${user.path}')" title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
+                                        <li><a class="taskaction taskaction-assign" href="javascript:sendNewAssignee('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','${user.path}')" title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
                                     </c:when>
                                     <c:when test="${taskStatus == 'active' and task.properties['assigneeUserKey'].string eq user.path}">
-                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${task.path}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
-                                        <li><a class="taskaction taskaction-start" href="javascript:sendNewStatus('${task.identifier}','${task.path}','started')" title="start"><fmt:message key="label.actions.start"/></a></li>
+                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
+                                        <li><a class="taskaction taskaction-start" href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','started')" title="start"><fmt:message key="label.actions.start"/></a></li>
                                     </c:when>
                                     <c:when test="${taskStatus == 'started' and task.properties['assigneeUserKey'].string eq user.path}">
-                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${task.path}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
-                                        <li><a class="taskaction taskaction-suspend" href="javascript:sendNewStatus('${task.identifier}','${task.path}','suspended')" title="suspend"><fmt:message key="label.actions.suspend"/></a></li>
+                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
+                                        <li><a class="taskaction taskaction-suspend" href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','suspended')" title="suspend"><fmt:message key="label.actions.suspend"/></a></li>
                                         <utility:setBundle basename="${task.properties['taskBundle'].string}" var="taskBundle"  />
                                         <c:if test="${not empty task.properties['targetNode'].node}">
                                         	<c:set var="currentTaskNode" value="${jcr:findDisplayableNode(task.properties['targetNode'].node, renderContext)}" />
-                                            <li><a class="taskaction taskaction-preview" target="_blank" href="<c:url value="${url.basePreview}${currentTaskNode.path}.html"/>"><fmt:message key="label.preview"/></a></li>
+                                            <li><a class="taskaction taskaction-preview" target="_blank" href="<c:url value="${url.basePreview}${fn:escapeXml(currentTaskNode.path)}.html"/>"><fmt:message key="label.preview"/></a></li>
                                         </c:if>
                                         <c:if test="${not empty task.properties['possibleOutcomes']}">
                                             <c:forEach items="${task.properties['possibleOutcomes']}" var="outcome" varStatus="status">
                                                 <fmt:message bundle="${taskBundle}" var="outcomeLabel" key="${fn:replace(task.properties['taskName'].string,' ','.')}.${fn:replace(outcome.string,' ','.')}"/>
                                                 <c:if test="${fn:startsWith(outcomeLabel, '???')}"><fmt:message bundle="${taskBundle}" var="outcomeLabel" key="${fn:replace(task.properties['taskName'].string,' ','.')}.${fn:replace(fn:toLowerCase(outcome.string),' ','.')}"/></c:if>
-                                                <li><a class="taskaction taskaction-start" href="javascript:sendNewStatus('${task.identifier}','${task.path}','finished','${outcome.string}')" title="${outcome.string}">${outcomeLabel}</a></li>
+                                                <li><a class="taskaction taskaction-start" href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','finished','${fn:escapeXml(fn:replace(functions:escapeJavaScript(outcome.string), '%', '%25'))}')" title="${fn:escapeXml(outcome.string)}">${fn:escapeXml(outcomeLabel)}</a></li>
                                             </c:forEach>
                                         </c:if>
                                         <c:if test="${empty task.properties['possibleOutcomes']}">
                                             <c:set var="taskId" value="${task.identifier}"/>
-                                            <li><div class="taskaction-complete"><input class="completeTaskAction" taskPath="<c:url value='${url.base}${currentNode.path}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${task.path}','finished')"/>&nbsp;<label for="btnComplete-${taskId}"><fmt:message key="label.actions.completed"/></label></div></li>
+                                            <li><div class="taskaction-complete"><input class="completeTaskAction" taskPath="<c:url value='${url.base}${currentNode.path}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${fn:escapeXml(taskPathJs)}','finished')"/>&nbsp;<label for="btnComplete-${taskId}"><fmt:message key="label.actions.completed"/></label></div></li>
                                         </c:if>
                                         <li>
                                             <jcr:node var="taskData" path="${task.path}/taskData"/>
@@ -250,13 +252,13 @@
                                         <li><div class="taskaction-complete"><input name="Completed" type="checkbox" disabled="disabled" checked="checked" value="Completed" />&nbsp;<fmt:message key="label.actions.completed"/></div></li>
                                     </c:when>
                                     <c:when test="${taskStatus == 'suspended' and task.properties['assigneeUserKey'].string eq user.path}">
-                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${task.path}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
-                                        <li><a class="taskaction taskaction-continue" href="javascript:sendNewStatus('${task.identifier}','${task.path}','started')" title="start"><fmt:message key="label.actions.resume"/></a></li>
+                                        <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
+                                        <li><a class="taskaction taskaction-continue" href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','started')" title="start"><fmt:message key="label.actions.resume"/></a></li>
                                     </c:when>
                                     <c:when test="${taskStatus == 'canceled'}">
                                     </c:when>
                                 </c:choose>
-                                <c:if test="${not empty task.properties['dueDate']}"><li><a class="taskaction taskaction-iCalendar" href="<c:url value='${url.base}${task.path}.ics'/>" title="iCalendar"><fmt:message key="label.actions.icalendar"/></a></li></c:if>
+                                <c:if test="${not empty task.properties['dueDate']}"><li><a class="taskaction taskaction-iCalendar" href="<c:url value='${url.base}${fn:escapeXml(task.path)}.ics'/>" title="iCalendar"><fmt:message key="label.actions.icalendar"/></a></li></c:if>
                             </ul>
                         </div>
                     </td>
