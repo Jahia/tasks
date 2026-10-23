@@ -5,6 +5,7 @@
 <%@ taglib prefix="fn" uri="http://java.sun.com/jsp/jstl/functions" %>
 <%@ taglib prefix="workflow" uri="http://www.jahia.org/tags/workflow" %>
 <%@ taglib prefix="uiComponents" uri="http://www.jahia.org/tags/uiComponentsLib" %>
+<%@ taglib prefix="functions" uri="http://www.jahia.org/tags/functions" %>
 <%--@elvariable id="currentNode" type="org.jahia.services.content.JCRNodeWrapper"--%>
 <%--@elvariable id="propertyDefinition" type="org.jahia.services.content.nodetypes.ExtendedPropertyDefinition"--%>
 <%--@elvariable id="type" type="org.jahia.services.content.nodetypes.ExtendedNodeType"--%>
@@ -66,20 +67,21 @@
         <ul>
             <c:forEach items="${moduleMap.currentList}" var="task" varStatus="status" begin="${moduleMap.begin}"
                        end="${moduleMap.end}">
+                <c:set var="taskPathJs" value="${functions:escapeJavaScript(task.path)}"/>
                 <template:tokenizedForm>
                     <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post"
-                          action="<c:url value='${url.base}'/>${task.path}">
+                          action="<c:url value='${url.base}'/>${fn:escapeXml(task.path)}">
                     </form>
                 </template:tokenizedForm>
                 <li>
-                    <a href="<c:url value='${url.base}${task.path}.html'/>">${fn:escapeXml(task.displayableName)}</a>
+                    <a href="<c:url value='${url.base}${fn:escapeXml(task.path)}.html'/>">${fn:escapeXml(task.displayableName)}</a>
 
                     <c:choose>
                         <c:when test="${task.propertiesAsString.state == 'active'}">
                                 <span><img alt="" src="<c:url value='${url.currentModule}/images/right_16.png'/>"
                                            height="16" width="16"/></span>
                 <span>
-                    <a href="javascript:sendNewStatus('${task.identifier}','${task.path}','suspended')"><fmt:message
+                    <a href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','suspended')"><fmt:message
                             key="jnt_task.state.suspended"/></a>&nbsp;
                     <fmt:setBundle basename="${task.properties['taskBundle'].string}" var="taskBundle"/>
                                         <c:if test="${not empty task.properties['possibleOutcomes']}">
@@ -91,13 +93,13 @@
                                                         bundle="${taskBundle}" var="outcomeLabel"
                                                         key="${fn:replace(task.properties['taskName'].string,' ','.')}.${fn:replace(fn:toLowerCase(outcome.string),' ','.')}"/></c:if>
                                                 <a class="taskaction taskaction-start"
-                                                   href="javascript:sendNewStatus('${task.identifier}','${task.path}','finished','${outcome.string}')"
-                                                   title="${outcome.string}">${outcomeLabel}</a>
+                                                   href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','finished','${fn:escapeXml(fn:replace(functions:escapeJavaScript(outcome.string), '%', '%25'))}')"
+                                                   title="${fn:escapeXml(outcome.string)}">${fn:escapeXml(outcomeLabel)}</a>
                                             </c:forEach>
                                         </c:if>
                                         <c:if test="${empty task.properties['possibleOutcomes']}">
 
-                                            <a href="javascript:send('${task.path}','finished')"><fmt:message key="jnt_task.complete"/></a>
+                                            <a href="javascript:send('${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','finished')"><fmt:message key="jnt_task.complete"/></a>
                                         </c:if>
                 </span>
                         </c:when>
@@ -109,7 +111,7 @@
                 <span><img alt="" src="<c:url value='${url.currentModule}/images/bubble_16.png'/>" height="16"
                            width="16"/></span>
                 <span>
-                    <a href="javascript:sendNewStatus('${task.identifier}','${task.path}','active')"><fmt:message
+                    <a href="javascript:sendNewStatus('${task.identifier}','${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}','active')"><fmt:message
                             key="jnt_task.continue"/></a>
                 </span>
                         </c:when>
