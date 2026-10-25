@@ -118,7 +118,7 @@
                         <c:if test="${empty task.properties['possibleOutcomes']}">
                             <c:set var="taskId" value="${task.identifier}"/>
                             <label class="checkbox" for="btnComplete-${taskId}">
-                                <input class="checkbox completeTaskAction" taskPath="<c:url value='${url.basePreview}${currentNode.path}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${fn:escapeXml(taskPathJs)}','finished')"/>
+                                <input class="checkbox completeTaskAction" taskPath="<c:url value='${url.basePreview}${fn:escapeXml(currentNode.path)}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${fn:escapeXml(taskPathJs)}','finished')"/>
                                 &nbsp;<fmt:message key="label.actions.completed"/>
                             </label>
                         </c:if>
