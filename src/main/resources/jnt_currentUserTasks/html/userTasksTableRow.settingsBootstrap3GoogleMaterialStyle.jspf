@@ -1,4 +1,5 @@
 <c:forEach items="${moduleMap.currentList}" var="task" varStatus="status" begin="${moduleMap.begin}" end="${moduleMap.end}">
+    <c:set var="taskPathJs" value="${functions:escapeJavaScript(task.path)}"/>
     <tr class="${status.count % 2 == 0 ? 'odd' : 'even'}">
         <td>
             <i id="iconTaskDisplayPlus_${task.identifier}" class="material-icons" style="vertical-align:middle"
@@ -25,7 +26,7 @@
                 <c:set value="${jcr:findDisplayableNodeInSite(task.properties['targetNode'].node, renderContext, task.properties['targetNode'].node.resolveSite)}" var="displayableNode"/>
                 &nbsp;-&nbsp;
                 <span>
-                    <a href="<c:url value='${baseEdit}${displayableNode.path}.html'/>" target="_blank">
+                    <a href="<c:url value='${baseEdit}${fn:escapeXml(displayableNode.path)}.html'/>" target="_blank">
                             ${fn:escapeXml(task.properties["targetNode"].node.displayableName)}
                     </a>
                 </span>
@@ -34,8 +35,8 @@
             <c:if test="${not empty displayableNode and not jcr:isNodeType(displayableNode, 'jnt:user')}">
                 &nbsp;-&nbsp;
                 <span>
-                    <a href="<c:url value='${baseEdit}${displayableNode.path}.html'/>" target="_blank">
-                            ${displayableNode.displayableName}
+                    <a href="<c:url value='${baseEdit}${fn:escapeXml(displayableNode.path)}.html'/>" target="_blank">
+                            ${fn:escapeXml(displayableNode.displayableName)}
                     </a>
                 </span>
             </c:if>
@@ -52,7 +53,7 @@
                     <p>${fn:escapeXml(task.properties['description'].string)}</p>
                 </c:if>
                 <template:tokenizedForm>
-                    <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.basePreview}'/>${task.path}">
+                    <form id="tokenForm_${task.identifier}" name="tokenform_${task.identifier}" method="post" action="<c:url value='${url.basePreview}'/>${fn:escapeXml(task.path)}">
                     </form>
                 </template:tokenizedForm>
                 <c:set var="assignable" value="true"/>
@@ -77,29 +78,29 @@
                 </c:if>
                 <c:choose>
                     <c:when test="${task.properties.state.string == 'active' and task.properties['assigneeUserKey'].string ne user.path and assignable eq 'true'}">
-                        <a class="btn btn-primary btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${task.path}','${user.path}');return false;" title="assign to me">
+                        <a class="btn btn-primary btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','${user.path}');return false;" title="assign to me">
                             <fmt:message key="label.actions.assigneToMe"/>
                         </a>
                     </c:when>
                     <c:when test="${task.properties.state.string == 'active' and task.properties['assigneeUserKey'].string eq user.path}">
-                        <a class="btn btn-danger btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${task.path}','');return false;" title="Unassign">
+                        <a class="btn btn-danger btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','');return false;" title="Unassign">
                             <fmt:message key="label.actions.unassign"/>
                         </a>
-                        <a class="btn btn-success btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${task.path}','started');return false;" title="start">
+                        <a class="btn btn-success btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${fn:escapeXml(taskPathJs)}','started');return false;" title="start">
                             <fmt:message key="label.actions.start"/>
                         </a>
                     </c:when>
                     <c:when test="${task.properties.state.string == 'started' and task.properties['assigneeUserKey'].string eq user.path}">
-                        <a class="btn btn-danger btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${task.path}','');return false;" title="Unassign">
+                        <a class="btn btn-danger btn-sm" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','');return false;" title="Unassign">
                             <fmt:message key="label.actions.unassign"/>
                         </a>
-                        <a class="btn btn-warning btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${task.path}','suspended');return false;" title="suspend">
+                        <a class="btn btn-warning btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${fn:escapeXml(taskPathJs)}','suspended');return false;" title="suspend">
                             <fmt:message key="label.actions.suspend"/>
                         </a>
                         <utility:setBundle basename="${task.properties['taskBundle'].string}" var="taskBundle"/>
                         <c:if test="${not empty task.properties['targetNode'].node}">
                             <c:set var="currentTaskNode" value="${jcr:findDisplayableNode(task.properties['targetNode'].node, renderContext)}"/>
-                            <a class="btn btn-sm" target="_blank" href="<c:url value="${url.basePreview}${currentTaskNode.path}.html"/>">
+                            <a class="btn btn-sm" target="_blank" href="<c:url value="${url.basePreview}${fn:escapeXml(currentTaskNode.path)}.html"/>">
                                 <fmt:message key="label.preview"/>
                             </a>
                         </c:if>
@@ -108,8 +109,8 @@
                                 <fmt:message bundle="${taskBundle}" var="outcomeLabel" key="${fn:replace(task.properties['taskName'].string,' ','.')}.${fn:replace(outcome.string,' ','.')}"/>
                                 <c:if test="${fn:startsWith(outcomeLabel, '???')}"><fmt:message bundle="${taskBundle}" var="outcomeLabel" key="${fn:replace(task.properties['taskName'].string,' ','.')}.${fn:replace(fn:toLowerCase(outcome.string),' ','.')}"/></c:if>
                                 <div>
-                                    <a class="btn btn-primary btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${task.path}','finished','${outcome.string}');return false;" title="${outcome.string}">
-                                            ${outcomeLabel}
+                                    <a class="btn btn-primary btn-sm" href="#" onclick="sendNewStatus('${task.identifier}','${fn:escapeXml(taskPathJs)}','finished','${fn:escapeXml(functions:escapeJavaScript(outcome.string))}');return false;" title="${fn:escapeXml(outcome.string)}">
+                                            ${fn:escapeXml(outcomeLabel)}
                                     </a>
                                 </div>
                             </c:forEach>
@@ -117,7 +118,7 @@
                         <c:if test="${empty task.properties['possibleOutcomes']}">
                             <c:set var="taskId" value="${task.identifier}"/>
                             <label class="checkbox" for="btnComplete-${taskId}">
-                                <input class="checkbox completeTaskAction" taskPath="<c:url value='${url.basePreview}${currentNode.path}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${task.path}','finished')"/>
+                                <input class="checkbox completeTaskAction" taskPath="<c:url value='${url.basePreview}${fn:escapeXml(currentNode.path)}'/>" type="checkbox" id="btnComplete-${taskId}" onchange="sendNewStatus('${taskId}','${fn:escapeXml(taskPathJs)}','finished')"/>
                                 &nbsp;<fmt:message key="label.actions.completed"/>
                             </label>
                         </c:if>
@@ -137,10 +138,10 @@
                         &nbsp;<fmt:message key="label.actions.completed"/>
                     </c:when>
                     <c:when test="${task.properties.state.string == 'suspended' and task.properties['assigneeUserKey'].string eq user.path}">
-                        <a class="btn btn-danger btn-small" href="#" onclick="sendNewAssignee('${task.identifier}','${task.path}','');return false;" title="Unassign">
+                        <a class="btn btn-danger btn-small" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','');return false;" title="Unassign">
                             <fmt:message key="label.actions.unassign"/>
                         </a>
-                        <a class="btn btn-success btn-small" href="#" onclick="sendNewStatus('${task.identifier}','${task.path}','started');return false;" title="start">
+                        <a class="btn btn-success btn-small" href="#" onclick="sendNewStatus('${task.identifier}','${fn:escapeXml(taskPathJs)}','started');return false;" title="start">
                             <fmt:message key="label.actions.start"/>
                         </a>
                     </c:when>
@@ -149,7 +150,7 @@
                 </c:choose>
                 <c:if test="${not empty task.properties['dueDate']}">
                     <div>
-                        <a class="btn" href="<c:url value='${url.base}${task.path}.ics'/>" title="iCalendar">
+                        <a class="btn" href="<c:url value='${url.base}${fn:escapeXml(task.path)}.ics'/>" title="iCalendar">
                             <fmt:message key="label.actions.icalendar"/>
                         </a>
                     </div>
