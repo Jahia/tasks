@@ -42,6 +42,22 @@ export const TASK_SCOPES: Array<{label: string; value: TaskScope}> = [
 
 export const DEFAULT_SCOPE: TaskScope = 'assignedToMe';
 
+// How the same tasks are laid out: as cards in state columns, or as one sortable table. The board
+// answers "what is moving where", the list answers "what is there, ordered by the column I picked" --
+// so this is a presentation choice over one set of tasks, not a different set, and the scope, search
+// and sort beside it keep their meaning across the switch.
+export type TaskViewMode = 'board' | 'list';
+
+export const DEFAULT_VIEW_MODE: TaskViewMode = 'board';
+
+// Remembered per viewer, not per site: "My Tasks" is one screen about one person, unlike jContent's
+// per-site-per-accordion view mode. Browser-local by design -- a preference worth keeping between
+// visits but not worth a round trip, and the board renders correctly when it comes back empty.
+export const VIEW_MODE_STORAGE_KEY = 'tasks-my-tasks-view-mode';
+
+export const isTaskViewMode = (value: unknown): value is TaskViewMode =>
+    value === 'board' || value === 'list';
+
 // The one state whose stored name is not the word to show. "Close" is what the button says, so
 // "Closed" is what the task has to read as afterwards -- "Finished" would be a second name for
 // the same thing, and the reader has no way to know they are the same. Every other state is shown
@@ -140,6 +156,7 @@ const TASK_CARD_FIELDS = /* GraphQL */ `
     createdDate
     closedDate
     dueDate
+    priority
     owner
     assigneeDisplayName
     state
@@ -274,6 +291,9 @@ export type TaskBoardNode = {
     // existed -- see GqlTaskBoard#getClosedDate.
     closedDate: string | null;
     dueDate: string | null;
+    // "low" | "normal" | "high" as stored, or null. Shown by the list view's Priority column; the
+    // cards do not show it. Not sortable -- see LIST_COLUMN_SORT_ARGUMENT.
+    priority: string | null;
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
@@ -305,6 +325,32 @@ export type TaskBoardConnection = {
 
 // One connection per column, keyed by the aliases columnSelection() emits.
 export type TaskBoardQueryResult = Record<ColumnKey, TaskBoardConnection>;
+
+/**
+ * The same tasks as the board, in one connection instead of three.
+ *
+ * The list view shows every state together in one sortable table, so it asks for the same
+ * taskBoard field with no filterState at all -- TaskBoardQueryExtensions#appendStateFilter adds no
+ * clause for an empty one, which is exactly "every state". Search, sort and scope are the same
+ * bind variables the board sends, so switching view keeps the toolbar's meaning.
+ */
+export const TASK_LIST_QUERY = /* GraphQL */ `
+    query TaskList($first: Int!, $search: String, $sortBy: String, $sortOrder: String, $scope: String) {
+        tasks: taskBoard(first: $first, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, scope: $scope) {
+            pageInfo {
+                hasNextPage
+                totalCount
+            }
+            edges {
+                node {
+                    ${TASK_CARD_FIELDS}
+                }
+            }
+        }
+    }
+`;
+
+export type TaskListQueryResult = {tasks: TaskBoardConnection};
 
 export type InitialTaskBoardQueryResult = TaskBoardQueryResult & {
     taskBoardCurrentUserKey: string;
