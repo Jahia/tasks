@@ -2,3 +2,5 @@ results/
 cypress/screenshots/
 cypress/videos/
 cypress/downloads/
+.env
+artifacts/
