@@ -126,20 +126,31 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
     });
 
     describe('sorting', () => {
-        // Titles deliberately alphabetize in a DIFFERENT order than their states do, so a
-        // title-sort test and a state-sort test each assert a distinct expected order -- proving
-        // each one actually sorts by its own field, not by some other coincidentally-matching order.
+        // Every ordering the board returns puts the CLOSED group after the open one, whatever the
+        // caller sorted on (TaskBoardQueryExtensions#boardOrdering: the requested sort is the
+        // second term, never the first). So the finished task below is last in all three
+        // expectations, and the sort under test only ever reorders the three open ones.
+        //
+        // Three open tasks, not two: with two, the open group has only two possible orders, so a
+        // state sort necessarily matches either the ascending or the descending title sort and the
+        // test proves nothing. With three, the state order below is distinct from both.
+        //
+        // Titles alphabetize alpha < bravo < charlie < delta; states alphabetize active < finished
+        // < started < suspended. The two orders are deliberately different, so each test asserts an
+        // order only its own field produces.
         // "zzsort-" + the shared "search" param (already covered above) scopes the repo-wide query
-        // down to just these three, the same way the search describe block does.
-        const BRAVO_SUSPENDED = 'zzsort-bravo';
-        const ALPHA_ACTIVE = 'zzsort-alpha';
+        // down to just these four, the same way the search describe block does.
+        const ALPHA_STARTED = 'zzsort-alpha';
+        const BRAVO_ACTIVE = 'zzsort-bravo';
         const CHARLIE_FINISHED = 'zzsort-charlie';
-        const names = [BRAVO_SUSPENDED, ALPHA_ACTIVE, CHARLIE_FINISHED];
+        const DELTA_SUSPENDED = 'zzsort-delta';
+        const names = [ALPHA_STARTED, BRAVO_ACTIVE, CHARLIE_FINISHED, DELTA_SUSPENDED];
 
         before(() => {
-            addTask(BRAVO_SUSPENDED, [{name: 'state', value: 'suspended'}]);
-            addTask(ALPHA_ACTIVE, [{name: 'state', value: 'active'}]);
+            addTask(ALPHA_STARTED, [{name: 'state', value: 'started'}]);
+            addTask(BRAVO_ACTIVE, [{name: 'state', value: 'active'}]);
             addTask(CHARLIE_FINISHED, [{name: 'state', value: 'finished'}]);
+            addTask(DELTA_SUSPENDED, [{name: 'state', value: 'suspended'}]);
         });
 
         after(() => {
@@ -155,7 +166,7 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'title', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([ALPHA_ACTIVE, BRAVO_SUSPENDED, CHARLIE_FINISHED]);
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([ALPHA_STARTED, BRAVO_ACTIVE, DELTA_SUSPENDED, CHARLIE_FINISHED]);
             });
         });
 
@@ -164,18 +175,21 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'title', sortOrder: 'descending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([CHARLIE_FINISHED, BRAVO_SUSPENDED, ALPHA_ACTIVE]);
+                // Descending reverses the OPEN group only: the finished task stays last, because
+                // the closed group is the first term of the ordering and direction never reaches it.
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([DELTA_SUSPENDED, BRAVO_ACTIVE, ALPHA_STARTED, CHARLIE_FINISHED]);
             });
         });
 
-        // Groups same-state tasks together, in state's own alphabetical order (active < finished
-        // < suspended) -- NOT title order, confirming this sorts by state and not by coincidence.
+        // Orders the open group by state's own alphabetical order (active < started < suspended),
+        // which is neither the ascending nor the descending title order above -- so passing this
+        // proves it sorted by state rather than landing on a coincidentally matching order.
         it('sorts by state ascending, grouping same-state tasks together', () => {
             cy.apollo({
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'state', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([ALPHA_ACTIVE, CHARLIE_FINISHED, BRAVO_SUSPENDED]);
+                expect(titlesOf(data.taskBoard.edges)).to.deep.equal([BRAVO_ACTIVE, ALPHA_STARTED, DELTA_SUSPENDED, CHARLIE_FINISHED]);
             });
         });
 
@@ -189,14 +203,17 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'creator', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+                // Counted from the fixture list rather than written out: this asserts "every
+                // zzsort task came back", and a literal here silently means something else the
+                // next time one is added.
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(names.length);
             });
 
             cy.apollo({
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'owner', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(names.length);
             });
         });
     });
