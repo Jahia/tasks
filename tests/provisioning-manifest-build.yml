@@ -3,9 +3,28 @@
 
 # The test suite creates its sites on dx-base-demo-templates (see tests/cypress/support/constants.ts) --
 # graphql-dxm-provider is not listed here, it comes from this module's own jahia-depends header.
+#
+# The demo template set's own jahia-depends has to be listed too: provisioning installs exactly the
+# bundles named here and does not pull a module's Jahia dependencies after it, so an unlisted one
+# leaves the template set installed-but-not-started ("has unresolved dependency <x> and won't be
+# started"). A site then cannot be created on it, which fails the before-all hook of every spec.
+# Only the names missing from a stock Jahia are listed: default, search, facets and
+# legacy-default-components are already there.
 - installBundle:
   - 'mvn:org.jahia.modules/dx-base-demo-core'
   - 'mvn:org.jahia.modules/dx-base-demo-components'
   - 'mvn:org.jahia.modules/dx-base-demo-templates'
+  - 'mvn:org.jahia.modules/bootstrap3-core'
+  - 'mvn:org.jahia.modules/bootstrap3-components'
+  - 'mvn:org.jahia.modules/font-awesome'
+  - 'mvn:org.jahia.modules/skins'
+  - 'mvn:org.jahia.modules/bookmarks'
+  - 'mvn:org.jahia.modules/topstories'
+  - 'mvn:org.jahia.modules/calendar'
+  - 'mvn:org.jahia.modules/rating'
+  - 'mvn:org.jahia.modules/location'
+  - 'mvn:org.jahia.modules/news'
+  - 'mvn:org.jahia.modules/event'
+  - 'mvn:org.jahia.modules/person'
   autoStart: true
   uninstallPreviousVersion: true
