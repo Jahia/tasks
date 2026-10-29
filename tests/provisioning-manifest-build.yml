@@ -1,6 +1,15 @@
 - addMavenRepository: 'https://store.jahia.com/nexus/content/repositories/jahia-public-app-store@id=JahiaStore'
 - addMavenRepository: 'https://devtools.jahia.com/nexus/content/groups/public/@snapshots@noreleases@id=JahiaSnapshot'
 
+# EXPERIMENT ONLY -- do not merge. The jahia-ee-dev image now carries app-shell 4.0.0-SNAPSHOT,
+# whose HTML5/standards-mode switch and forced @jahia/ui-extender 2.0.0 are the open suspects for
+# the four task-ui failures. Pinning the last 3.x release turns that into an A/B: if those four
+# pass here and fail on ci/restore-integration-test-harness, app-shell 4 is the variable.
+- installBundle:
+  - 'mvn:org.jahia.modules/app-shell/3.4.0'
+  autoStart: true
+  uninstallPreviousVersion: true
+
 # The test suite creates its sites on dx-base-demo-templates (see tests/cypress/support/constants.ts) --
 # graphql-dxm-provider is not listed here, it comes from this module's own jahia-depends header.
 #
