@@ -46,8 +46,9 @@
 <template:addResources type="css" resources="timepicker.css"/>
 <div id="currentUserTasks${currentNode.identifier}">
 <c:if test="${currentResource.workspace eq 'live'}">
+    <c:url var="loadUrl" value="${url.basePreview}${currentNode.path}.html.ajax"/>
     <script type="text/javascript">
-        $('#currentUserTasks${currentNode.identifier}').load('<c:url value="${url.basePreview}${currentNode.path}.html.ajax"/>');
+        $('#currentUserTasks${currentNode.identifier}').load('${functions:escapeJavaScript(loadUrl)}');
     </script>
 </c:if>
 
@@ -60,7 +61,8 @@
 
 <form name="myform" method="post">
     <input type="hidden" name="jcrNodeType" value="jnt:task">
-    <input type="hidden" name="jcrRedirectTo" value="<c:url value='${url.base}${renderContext.mainResource.node.path}'/>">
+    <c:url var="redirectUrl" value="${url.base}${renderContext.mainResource.node.path}"/>
+    <input type="hidden" name="jcrRedirectTo" value="${fn:escapeXml(redirectUrl)}">
     <input type="hidden" name="jcrNewNodeOutputFormat" value="<c:url value='${renderContext.mainResource.template}.html'/>">
     <input type="hidden" name="state">
 </form>
@@ -92,7 +94,7 @@
             $(".taskaction").addClass("taskaction-disabled");
             post = function () {
                 $.post('<c:url value="${url.base}"/>' + task, {"jcrMethodToCall":"put","state":state,"finalOutcome":finalOutcome,"form-token":document.forms['tokenForm_' + uuid].elements['form-token'].value}, function() {
-                    $('${identifierName}').load('${reloadurl}',null,function() {
+                    $('${identifierName}').load('${functions:escapeJavaScript(reloadurl)}',null,function() {
                         $("#taskdetail_"+uuid).css("display","block");
                     });
                 }, "json");
@@ -113,7 +115,7 @@
             $(".taskaction-complete").addClass("taskaction-disabled");
             $(".taskaction").addClass("taskaction-disabled");
             $.post('<c:url value="${url.base}"/>' + task, {"jcrMethodToCall":"put","state":"active","assigneeUserKey":key,"form-token":document.forms['tokenForm_' + uuid].elements['form-token'].value}, function() {
-                $('${identifierName}').load('${reloadurl}',null,function(){
+                $('${identifierName}').load('${functions:escapeJavaScript(reloadurl)}',null,function(){
                     $("#taskdetail_"+uuid).css("display","block");
                 });
             }, "json");

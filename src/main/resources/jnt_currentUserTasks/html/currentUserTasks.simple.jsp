@@ -38,7 +38,8 @@
 <template:tokenizedForm>
     <form name="myform" method="post" action="">
         <input type="hidden" name="jcrNodeType" value="jnt:task">
-        <input type="hidden" name="jcrRedirectTo" value="<c:url value='${url.base}${currentNode.path}.html${ps}'/>">
+        <c:url var="redirectUrl" value="${url.base}${currentNode.path}.html${ps}"/>
+        <input type="hidden" name="jcrRedirectTo" value="${fn:escapeXml(redirectUrl)}">
         <input type="hidden" name="state">
     </form>
 </template:tokenizedForm>

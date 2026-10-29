@@ -3,6 +3,7 @@
 <%@ taglib prefix="template" uri="http://www.jahia.org/tags/templateLib" %>
 <%@ taglib prefix="fn" uri="http://java.sun.com/jsp/jstl/functions" %>
 <%@ taglib prefix="jcr" uri="http://www.jahia.org/tags/jcr" %>
+<%@ taglib prefix="functions" uri="http://www.jahia.org/tags/functions" %>
 <template:addResources type="css" resources="tasks.css"/>
 
 <script type="text/javascript">
@@ -14,8 +15,10 @@
     }
 </script>
 
+<c:url var="taskUrl" value="${url.base}${currentNode.path}"/>
+<c:set var="taskPathHref" value="${fn:escapeXml(fn:replace(functions:escapeJavaScript(currentNode.path), '%', '%25'))}"/>
 <div class="Form taskFormConsult"><!--start Form -->
-    <form method="post" name="myform" action="<c:url value='${url.base}${currentNode.path}'/>">
+    <form method="post" name="myform" action="${fn:escapeXml(taskUrl)}">
         <input type="hidden" name="jcrNodeType" value="jnt:task">
         <input type="hidden" name="state">
 
@@ -68,9 +71,9 @@
                         <span><img alt="" src="<c:url value='${url.currentModule}/images/right_16.png'/>"/></span>
                         <c:if test="${canchange}">
             <span>
-                <a href="javascript:send('${currentNode.path}','suspended')"><fmt:message key="jnt_task.suspended"/></a>&nbsp;
-                <a href="javascript:send('${currentNode.path}','cancelled')"><fmt:message key="jnt_task.cancel"/></a>&nbsp;
-                <a href="javascript:send('${currentNode.path}','finished')"><fmt:message key="jnt_task.complete"/></a>
+                <a href="javascript:send('${taskPathHref}','suspended')"><fmt:message key="jnt_task.suspended"/></a>&nbsp;
+                <a href="javascript:send('${taskPathHref}','cancelled')"><fmt:message key="jnt_task.cancel"/></a>&nbsp;
+                <a href="javascript:send('${taskPathHref}','finished')"><fmt:message key="jnt_task.complete"/></a>
             </span>
                         </c:if>
                     </c:when>
@@ -81,8 +84,8 @@
                         <span><img alt="" src="<c:url value='${url.currentModule}/images/bubble_16.png'/>"/></span>
                         <c:if test="${canchange}">
             <span>
-                <a href="javascript:send('${currentNode.path}','cancelled')"><fmt:message key="jnt_task.cancel"/></a>&nbsp;
-                <a href="javascript:send('${currentNode.path}','active')"><fmt:message key="jnt_task.continue"/></a>
+                <a href="javascript:send('${taskPathHref}','cancelled')"><fmt:message key="jnt_task.cancel"/></a>&nbsp;
+                <a href="javascript:send('${taskPathHref}','active')"><fmt:message key="jnt_task.continue"/></a>
             </span>
                         </c:if>
                     </c:when>
