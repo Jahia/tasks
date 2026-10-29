@@ -50,8 +50,9 @@
         <h2>My Tasks</h2>
     </div>
     <c:if test="${currentResource.workspace eq 'live'}">
+        <c:url var="loadUrl" value="${url.baseUserBoardFrameEdit}${currentNode.path}.html.ajax"/>
         <script type="text/javascript">
-            $('#currentUserTasks${currentNode.identifier}').load('<c:url value="${url.baseUserBoardFrameEdit}${currentNode.path}.html.ajax"/>');
+            $('#currentUserTasks${currentNode.identifier}').load('${functions:escapeJavaScript(loadUrl)}');
         </script>
     </c:if>
 
@@ -64,7 +65,8 @@
 
         <form name="myform" method="post">
             <input type="hidden" name="jcrNodeType" value="jnt:task">
-            <input type="hidden" name="jcrRedirectTo" value="<c:url value='${url.base}${renderContext.mainResource.node.path}'/>">
+            <c:url var="redirectUrl" value="${url.base}${renderContext.mainResource.node.path}"/>
+            <input type="hidden" name="jcrRedirectTo" value="${fn:escapeXml(redirectUrl)}">
             <input type="hidden" name="jcrNewNodeOutputFormat" value="<c:url value='${renderContext.mainResource.template}.html'/>">
             <input type="hidden" name="state">
         </form>
@@ -79,7 +81,7 @@
             <c:set var="identifierName" value="#currentUserTasks${currentNode.identifier}"/>
 
             callback = function (uuid) {
-                    $('${identifierName}').load('${reloadurl}', null, function () {
+                    $('${identifierName}').load('${functions:escapeJavaScript(reloadurl)}', null, function () {
                         $("#taskdetail_" + uuid).css("display", "block");
                         $("#iconTaskDisplayPlus_" + uuid).hide();
                         $("#iconTaskDisplayMinus_" + uuid).show();
