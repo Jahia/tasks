@@ -6,9 +6,11 @@ import {TEST_SITE_KEY, TEST_TEMPLATE_SET} from '../support/constants';
 // render anything, this test actually cy.visit()s a real page and interacts with the rendered
 // React UI -- so you can watch the app under test in Cypress's right-hand pane.
 //
-// The task board is reached via the admin "My tasks" dashboard tile at /jahia/dashboard/tasks
-// (confirmed by hand, not guessed -- the internal adminRoute key 'tasks' registered in
-// src/javascript/init.tsx resolves to this URL under the app-shell's own routing).
+// The board hangs off the PROFILE icon, at /jahia/profile/tasks -- not the dashboard. It moved
+// there with the second-level dashboard menu it used to live in ("feat: follow My Tasks to the
+// profile section"), and /jahia/dashboard/tasks only redirects now. Visiting the old address does
+// not fail outright: jahia-dashboard still answers it with its own built-in tasks tab, so the page
+// loads and only the board is missing, which reads as a broken board rather than a wrong URL.
 //
 // A UI test for the detail view (TaskDetail.client.tsx, with its Suspend/Cancel/Complete
 // buttons) is intentionally not included yet: TaskBoard's cards have no click-to-navigate to
@@ -58,7 +60,7 @@ describe('Task board search (rendered UI, via the admin dashboard tile)', () => 
 
     it('filters the board live as you type in the search box', () => {
         cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
-        cy.visit('/jahia/dashboard/tasks');
+        cy.visit('/jahia/profile/tasks');
 
         cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('SSL');
 
@@ -68,7 +70,7 @@ describe('Task board search (rendered UI, via the admin dashboard tile)', () => 
 
     it('assigns a task to yourself and starts it, live from the board buttons', () => {
         cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
-        cy.visit('/jahia/dashboard/tasks');
+        cy.visit('/jahia/profile/tasks');
 
         cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('Rotate the backup credentials');
 
@@ -122,7 +124,7 @@ describe('Task board sorting (rendered UI, via the admin dashboard tile)', () =>
 
     it('reorders the board when you toggle the sort direction', () => {
         cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
-        cy.visit('/jahia/dashboard/tasks');
+        cy.visit('/jahia/profile/tasks');
 
         cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('Sorttest');
 
@@ -166,7 +168,7 @@ describe('Task board completion (rendered UI, via the admin dashboard tile)', ()
 
     it('completes a started task via its Publish decision button', () => {
         cy.loginAndStoreSession('root', Cypress.env('SUPER_USER_PASSWORD'), '/start');
-        cy.visit('/jahia/dashboard/tasks');
+        cy.visit('/jahia/profile/tasks');
 
         cy.get('input[placeholder="Search tasks..."]', {timeout: 30000}).type('Ship the release notes');
 
