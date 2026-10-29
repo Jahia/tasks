@@ -203,14 +203,17 @@ describe('Task board (taskBoard GraphQL query/mutations behind the React view)',
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'creator', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+                // Counted from the fixture list rather than written out: this asserts "every
+                // zzsort task came back", and a literal here silently means something else the
+                // next time one is added.
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(names.length);
             });
 
             cy.apollo({
                 queryFile: 'graphql/taskBoard.query.graphql',
                 variables: {first: PAGE_SIZE, search: 'zzsort', sortBy: 'owner', sortOrder: 'ascending'}
             }).then(({data}) => {
-                expect(titlesOf(data.taskBoard.edges)).to.have.length(3);
+                expect(titlesOf(data.taskBoard.edges)).to.have.length(names.length);
             });
         });
     });
