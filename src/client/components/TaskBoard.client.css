@@ -85,6 +85,82 @@
     width: 260px;
 }
 
+/* Two segments of one control, so they sit against each other with a shared border rather than
+   the gap the scope pills have between them: those are five independent choices, these are the
+   two halves of a switch. */
+.task-board__views {
+    display: flex;
+    align-items: center;
+}
+
+.task-board__view {
+    padding: 2px var(--spacing-small);
+    border: 1px solid var(--color-gray_light);
+    background-color: transparent;
+    color: var(--color-gray_dark);
+    font: inherit;
+    font-size: var(--fontSize-caption, 12px);
+    cursor: pointer;
+}
+
+.task-board__view:first-child {
+    border-radius: 3px 0 0 3px;
+}
+
+/* Collapses the shared edge, so the pair reads as one control two segments wide rather than two
+   buttons that happen to touch. */
+.task-board__view:last-child {
+    margin-left: -1px;
+    border-radius: 0 3px 3px 0;
+}
+
+.task-board__view:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
+/* Filled, matching the selected scope pill: which view is showing has to be readable at a glance
+   from across the toolbar, and a border-colour change alone is not. */
+.task-board__view--selected {
+    border-color: var(--color-accent);
+    background-color: var(--color-accent);
+    color: var(--color-light);
+    /* Above its neighbour's un-collapsed edge, so the filled segment keeps a full border. */
+    position: relative;
+}
+
+.task-board__view--selected:hover {
+    color: var(--color-light);
+}
+
+/* --- List view ------------------------------------------------------------------------------ */
+
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+    /* The table scrolls sideways rather than crushing its fixed columns: the six fixed widths plus
+       a readable Task column do not fit a narrow window, and squeezing them wraps every cell. */
+    overflow-x: auto;
+}
+
+/* Stacked, not inline: a task's title and the line under it are one piece of information about
+   one task, and a long workflow summary beside the title would push the other columns out. */
+.task-list__task-cell,
+.task-list__due-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* Left, against DataTable's own vertical centring: a two-line cell beside one-line cells reads
+       as ragged when both are centred. */
+    align-items: flex-start;
+}
+
+.task-list__show-more {
+    display: flex;
+    justify-content: center;
+}
+
 .task-board__list {
     display: flex;
     flex-direction: column;
