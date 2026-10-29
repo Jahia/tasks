@@ -18,12 +18,17 @@
   - 'mvn:org.jahia.modules/bootstrap3-components'
   - 'mvn:org.jahia.modules/font-awesome'
   - 'mvn:org.jahia.modules/skins'
+  # bookmarks declares default-skins, which declares skins above: the closure runs two levels
+  # deep, not one, which is why the first pass still left the template set unstarted.
+  - 'mvn:org.jahia.modules/default-skins'
   - 'mvn:org.jahia.modules/bookmarks'
   - 'mvn:org.jahia.modules/topstories'
   - 'mvn:org.jahia.modules/calendar'
   - 'mvn:org.jahia.modules/rating'
   - 'mvn:org.jahia.modules/location'
+  # news declares grid, the second of the two second-level dependencies.
   - 'mvn:org.jahia.modules/news'
+  - 'mvn:org.jahia.modules/grid'
   - 'mvn:org.jahia.modules/event'
   - 'mvn:org.jahia.modules/person'
   autoStart: true
