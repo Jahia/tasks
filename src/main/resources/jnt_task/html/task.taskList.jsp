@@ -64,6 +64,10 @@
         <c:param name="${p.key}" value="${p.value}"/>
     </c:forEach>
 </c:url>
+<c:set var="taskPathJs" value="${functions:escapeJavaScript(currentNode.path)}"/>
+<c:set var="taskPathHref" value="${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}"/>
+<c:set var="reloadUrlJs" value="${functions:escapeJavaScript(reloadurl)}"/>
+<c:set var="reloadUrlHref" value="${fn:escapeXml(fn:replace(reloadUrlJs, '%', '%25'))}"/>
 <c:set var="identifierName" value="#task_${currentNode.identifier}"/>
 <c:if test="${not renderContext.ajaxRequest}">
     <div class="taskComment${finished ? ' taskCommentResolved' : ''}" id="task_${currentNode.identifier}">
@@ -87,7 +91,7 @@
 </p>
 <template:tokenizedForm>
     <form id="tokenForm_${currentNode.identifier}" name="tokenform_${currentNode.identifier}" method="post"
-          action="<c:url value='${url.base}'/>${currentNode.path}">
+          action="<c:url value='${url.base}'/>${fn:escapeXml(currentNode.path)}">
     </form>
 </template:tokenizedForm>
 <ul class="taskactionslist">
@@ -114,23 +118,23 @@
     <c:choose>
         <c:when test="${currentNode.properties.state.string == 'active' and currentNode.properties['assigneeUserKey'].string ne currentUser.path and assignable eq 'true'}">
             <li><a class="taskaction taskaction-assign"
-                   href="javascript:sendNewAssignee('${currentNode.identifier}','${currentNode.path}','${currentUser.path}','${reloadurl}')"
+                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','${currentUser.path}','${reloadUrlHref}')"
                    title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
         </c:when>
         <c:when test="${currentNode.properties.state.string == 'active' and currentNode.properties['assigneeUserKey'].string eq currentUser.path}">
             <li><a class="taskaction taskaction-refuse"
-                   href="javascript:sendNewAssignee('${currentNode.identifier}','${currentNode.path}','','${reloadurl}')"
+                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','','${reloadUrlHref}')"
                    title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
             <li><a class="taskaction taskaction-start"
-                   href="javascript:sendNewStatus('${currentNode.identifier}','${currentNode.path}','started',null,'${reloadurl}')"
+                   href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','started',null,'${reloadUrlHref}')"
                    title="start"><fmt:message key="label.actions.start"/></a></li>
         </c:when>
         <c:when test="${currentNode.properties.state.string == 'started' and currentNode.properties['assigneeUserKey'].string eq currentUser.path}">
             <li><a class="taskaction taskaction-refuse"
-                   href="javascript:sendNewAssignee('${currentNode.identifier}','${currentNode.path}','','${reloadurl}')"
+                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','','${reloadUrlHref}')"
                    title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
             <li><a class="taskaction taskaction-suspend"
-                   href="javascript:sendNewStatus('${currentNode.identifier}','${currentNode.path}','suspended',null,'${reloadurl}')"
+                   href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','suspended',null,'${reloadUrlHref}')"
                    title="suspend"><fmt:message
                     key="label.actions.suspend"/></a></li>
             <fmt:setBundle basename="${currentNode.properties['taskBundle'].string}" var="taskBundle"/>
@@ -142,7 +146,7 @@
                                                                                     var="outcomeLabel"
                                                                                     key="${fn:replace(currentNode.properties['taskName'].string,' ','.')}.${fn:replace(fn:toLowerCase(outcome.string),' ','.')}"/></c:if>
                     <li><a class="taskaction taskaction-start"
-                           href="javascript:sendNewStatus('${currentNode.identifier}','${currentNode.path}','finished','${outcome.string}','${reloadurl}')"
+                           href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','finished','${outcome.string}','${reloadUrlHref}')"
                            title="${outcome.string}">${outcomeLabel}</a></li>
                 </c:forEach>
             </c:if>
@@ -150,9 +154,9 @@
                 <c:set var="taskId" value="${currentNode.identifier}"/>
                 <li>
                     <div class="taskaction-complete"><input class="completeTaskAction"
-                                                            taskPath="<c:url value='${url.base}${currentNode.path}'/>"
+                                                            taskPath="<c:url value='${url.base}${fn:escapeXml(currentNode.path)}'/>"
                                                             type="checkbox" id="btnComplete-${taskId}"
-                                                            onchange="sendNewStatus('${taskId}','${currentNode.path}','finished',null,'${reloadurl}')"/>&nbsp;<label
+                                                            onchange="sendNewStatus('${taskId}','${fn:escapeXml(taskPathJs)}','finished',null,'${fn:escapeXml(reloadUrlJs)}')"/>&nbsp;<label
                             for="btnComplete-${taskId}"><fmt:message key="label.actions.completed"/></label></div>
                 </li>
             </c:if>
@@ -179,10 +183,10 @@
         </c:when>
         <c:when test="${currentNode.properties.state.string == 'suspended' and currentNode.properties['assigneeUserKey'].string eq currentUser.path}">
             <li><a class="taskaction taskaction-refuse"
-                   href="javascript:sendNewAssignee('${currentNode.identifier}','${currentNode.path}','','${reloadurl}')"
+                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','','${reloadUrlHref}')"
                    title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
             <li><a class="taskaction taskaction-continue"
-                   href="javascript:sendNewStatus('${currentNode.identifier}','${currentNode.path}','started',null,'${reloadurl}')"
+                   href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','started',null,'${reloadUrlHref}')"
                    title="start"><fmt:message key="label.actions.resume"/></a></li>
         </c:when>
         <c:when test="${currentNode.properties.state.string == 'canceled'}">
