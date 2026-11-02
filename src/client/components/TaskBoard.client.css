@@ -21,14 +21,6 @@
     overflow-y: auto;
 }
 
-.task-board__toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--spacing-medium);
-}
-
 /* The count and the three list badges, which read as one sentence: "5 task(s), assigned to me". */
 .task-board__scopes {
     display: flex;
@@ -67,23 +59,51 @@
     color: var(--color-light);
 }
 
+/* Header's toolbar slot is a single row, so these wrap rather than overflow it when the window
+   is narrow and the sort control is showing. */
 .task-board__toolbar-controls {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--spacing-large);
-}
-
-.task-board__sort,
-.task-board__search {
-    display: flex;
-    align-items: center;
+    justify-content: flex-end;
     gap: var(--spacing-small);
 }
 
-.task-board__search-input {
-    width: 260px;
+.task-board__sort {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-nano, 2px);
 }
+
+/* Narrower than the 260px it had in the full-width toolbar below the header: in the header slot
+   it shares one row with the sort and view controls. */
+.task-board__search-input {
+    width: 200px;
+}
+
+/* --- List view ------------------------------------------------------------------------------ */
+
+.task-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-medium);
+    /* The table scrolls sideways rather than crushing its fixed columns: the six fixed widths plus
+       a readable Task column do not fit a narrow window, and squeezing them wraps every cell. */
+    overflow-x: auto;
+}
+
+/* Stacked, not inline: a task's title and the line under it are one piece of information about
+   one task, and a long workflow summary beside the title would push the other columns out. */
+.task-list__task-cell,
+.task-list__due-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    /* Left, against DataTable's own vertical centring: a two-line cell beside one-line cells reads
+       as ragged when both are centred. */
+    align-items: flex-start;
+}
+
 
 .task-board__list {
     display: flex;
@@ -303,6 +323,22 @@
  * button that lands on it. A list rather than a paragraph because it is a list - most tasks raised
  * from the Content Types accordion point at several records.
  */
+/*
+ * The line that says the list below is a publication request's contents rather than the task's
+ * own target. Quiet, because it is a label for the rows and not a second title: the rows are what
+ * the reviewer reads.
+ */
+.task-board__targets-heading {
+    margin: 0;
+    color: var(--color-gray, #7a7f88);
+}
+
+/* What the list could not say by itself: the items the viewer is not allowed to open. */
+.task-board__targets-note {
+    margin: 0;
+    color: var(--color-gray, #7a7f88);
+}
+
 .task-board__targets {
     display: flex;
     flex-direction: column;

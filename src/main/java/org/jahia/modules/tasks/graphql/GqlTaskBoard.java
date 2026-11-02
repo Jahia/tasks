@@ -73,6 +73,11 @@ public class GqlTaskBoard {
     // care whether it has a context at all.
     private final TaskBoardRequestContext context;
 
+    // What the engine still knows about this row -- see liveWorkflow(). volatile because
+    // graphql-java may resolve workflowSummary and requestItems of the same row on different
+    // threads: resolving twice is wasteful but harmless, publishing a half-built holder is not.
+    private volatile LiveWorkflow liveWorkflow;
+
     public GqlTaskBoard(JCRNodeWrapper node) {
         this(node, new TaskBoardRequestContext(null));
     }
@@ -296,9 +301,138 @@ public class GqlTaskBoard {
             + "plain jnt:task (no workflow at all), or if the underlying process can no longer be resolved.")
     public String getWorkflowSummary() {
         try {
+            LiveWorkflow live = liveWorkflow();
+            if (live.task == null || live.task.getWorkflowDefinition() == null) {
+                return null;
+            }
+            // Null once the process instance is no longer live in the jBPM session -- shouldn't
+            // normally happen for a task whose process is still open, but isn't guaranteed, so
+            // this degrades to "no summary" rather than erroring.
+            Workflow workflow = live.workflow;
+            if (workflow == null || workflow.getStartUser() == null || workflow.getStartTime() == null) {
+                return null;
+            }
+
+            Locale locale = JahiaLocaleContextHolder.getLocale();
+            String startUserDisplayName = resolveUserDisplayName(workflow.getStartUser());
+            String startDate = DateFormat.getDateInstance(DateFormat.SHORT, locale).format(workflow.getStartTime());
+            // The same count getRequestItemCount() answers, off the same list getRequestItems()
+            // draws from: the card states the count and then lists the items, and reading those
+            // two off separate places is how "5 content items involved" ends up above four rows.
+            Integer itemCount = getRequestItemCount();
+
+            return locale.getLanguage() + " - " + live.task.getWorkflowDefinition().getDisplayName()
+                    + " started by " + startUserDisplayName + " on " + startDate
+                    + " - " + (itemCount == null ? 0 : itemCount) + " content items involved";
+        } catch (Exception e) {
+            // Best-effort enrichment, not core task data: any failure here (a workflow-provider
+            // hiccup, a process that vanished between the two lookups above) just means this one
+            // summary line is missing from this row, not that the whole board query fails.
+            return null;
+        }
+    }
+
+    @GraphQLField
+    @GraphQLDescription("How many content items the publication request behind this task covers. The workflow "
+            + "engine's own count, so it includes items the viewer is not allowed to read. Null when there is no "
+            + "request to count: a plain jnt:task, or a workflow task whose process has ended.")
+    public Integer getRequestItemCount() {
+        List<String> ids = requestNodeIds();
+        return ids.isEmpty() ? null : ids.size();
+    }
+
+    /**
+     * The content a publication request actually covers, which the task node does not record.
+     *
+     * <p>Starting a workflow on a selection keeps the whole selection in the process variable
+     * {@code nodeIds} and puts only its FIRST entry on the task: core's
+     * {@code WorkflowService#startProcess} sets {@code nodeId} to
+     * {@code checkedNodeIds.iterator().next()}, and {@code JBPMTaskLifeCycleEventListener#createTask}
+     * writes {@code targetNode} from that one id -- and builds the task's title from that one
+     * node's name. So a five-item request reaches the board as a task naming one item, and
+     * {@link #getTargets()}, which reads the JCR property, can only ever answer that one. The
+     * other four exist solely in the engine.
+     *
+     * <p>Resolved through the viewer's own session, so an item they may not read is left out
+     * rather than disclosed. {@link #getRequestItemCount()} stays the engine's full count, and a
+     * list shorter than that count is the honest "some of this is not yours to see".
+     *
+     * <p>The decision remains one decision: {@code PublishWorkItemHandler} publishes the whole
+     * {@code nodeIds} list in one go and the outcome belongs to the process, not to an item.
+     * These are several things to look at before answering, not several things to answer.
+     */
+    @GraphQLField
+    @GraphQLDescription("The content items of the publication request behind this task, resolved through the "
+            + "viewer's own session so an item they cannot read is left out. Empty when there is no request: a "
+            + "plain jnt:task, or a workflow task whose process has ended.")
+    public List<GqlTaskTarget> getRequestItems(
+            @GraphQLName("limit")
+            @GraphQLDescription("At most how many items to resolve, for a caller that shows the first few and "
+                    + "asks again for the rest. Omitting it, or passing anything below 1, resolves all of them.")
+            Integer limit) {
+        List<String> ids = requestNodeIds();
+        if (ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        int cap = (limit == null || limit < 1) ? ids.size() : limit;
+        try {
+            JCRSessionWrapper session = node.getSession();
+            List<GqlTaskTarget> items = new ArrayList<>();
+            for (String id : ids) {
+                if (items.size() >= cap) {
+                    break;
+                }
+                try {
+                    items.add(new GqlTaskTarget((JCRNodeWrapper) session.getNodeByIdentifier(id)));
+                } catch (ItemNotFoundException | PathNotFoundException e) {
+                    // Deleted since the request was raised, or not this viewer's to read. The
+                    // request still stands, and the count above still reports it.
+                }
+            }
+            return items;
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve the publication request's items", e);
+        }
+    }
+
+    // The request's items as raw identifiers. Empty -- never null -- for every case that means
+    // "there is no request here": a plain task, a process that has ended, and a live process
+    // started by something other than WorkflowService#startProcess, which is the only thing that
+    // sets nodeIds.
+    private List<String> requestNodeIds() {
+        Workflow workflow = liveWorkflow().workflow;
+        if (workflow == null || workflow.getVariables() == null) {
+            return Collections.emptyList();
+        }
+        Object nodeIds = workflow.getVariables().get("nodeIds");
+        if (!(nodeIds instanceof List)) {
+            return Collections.emptyList();
+        }
+
+        List<String> ids = new ArrayList<>();
+        for (Object id : (List<?>) nodeIds) {
+            if (id instanceof String) {
+                ids.add((String) id);
+            }
+        }
+        return ids;
+    }
+
+    private LiveWorkflow liveWorkflow() {
+        LiveWorkflow memoized = liveWorkflow;
+        if (memoized == null) {
+            memoized = resolveLiveWorkflow();
+            liveWorkflow = memoized;
+        }
+        return memoized;
+    }
+
+    private LiveWorkflow resolveLiveWorkflow() {
+        try {
             if (!node.hasProperty("provider") || !node.hasProperty("taskId")) {
                 // Plain jnt:task -- never had a workflow process to begin with.
-                return null;
+                return LiveWorkflow.NONE;
             }
             Locale locale = JahiaLocaleContextHolder.getLocale();
             String provider = node.getPropertyAsString("provider");
@@ -306,35 +440,19 @@ public class GqlTaskBoard {
 
             WorkflowService workflowService = WorkflowService.getInstance();
             WorkflowTask task = workflowService.getWorkflowTask(taskId, provider, locale);
-            if (task == null || task.getWorkflowDefinition() == null) {
-                return null;
+            if (task == null) {
+                return LiveWorkflow.NONE;
             }
 
             // Memoized per request (#64): every task of the same workflow process -- all the
             // review tasks of one publication, say -- resolves the identical Workflow, and
             // getWorkflow is a round trip to the workflow engine. The context also documents the
             // argument-order trap in the WorkflowService call it wraps.
-            Workflow workflow = context.workflow(provider, task.getProcessId(), locale, workflowService);
-            if (workflow == null || workflow.getStartUser() == null || workflow.getStartTime() == null) {
-                // WorkflowService returns null once a process instance is no longer live in the
-                // jBPM session -- shouldn't normally happen for a task whose process is still
-                // open, but isn't guaranteed, so this degrades to "no summary" rather than erroring.
-                return null;
-            }
-
-            String startUserDisplayName = resolveUserDisplayName(workflow.getStartUser());
-            String startDate = DateFormat.getDateInstance(DateFormat.SHORT, locale).format(workflow.getStartTime());
-            Object nodeIds = workflow.getVariables() != null ? workflow.getVariables().get("nodeIds") : null;
-            int itemCount = nodeIds instanceof List ? ((List<?>) nodeIds).size() : 0;
-
-            return locale.getLanguage() + " - " + task.getWorkflowDefinition().getDisplayName()
-                    + " started by " + startUserDisplayName + " on " + startDate
-                    + " - " + itemCount + " content items involved";
+            return new LiveWorkflow(task, context.workflow(provider, task.getProcessId(), locale, workflowService));
         } catch (Exception e) {
-            // Best-effort enrichment, not core task data: any failure here (a workflow-provider
-            // hiccup, a process that vanished between the two lookups above) just means this one
-            // summary line is missing from this row, not that the whole board query fails.
-            return null;
+            // Same best-effort contract the fields reading this one have: a workflow-provider
+            // hiccup costs this row its summary and its item list, not the whole board.
+            return LiveWorkflow.NONE;
         }
     }
 
@@ -493,7 +611,7 @@ public class GqlTaskBoard {
         return null;
     }
 
-    private static boolean isRenderablePage(JCRNodeWrapper node) throws RepositoryException {
+    static boolean isRenderablePage(JCRNodeWrapper node) throws RepositoryException {
         return node.isNodeType("jnt:page") || node.isNodeType("jmix:mainResource");
     }
 
@@ -509,6 +627,32 @@ public class GqlTaskBoard {
                 return null;
             }
             parent = parent.getParent();
+        }
+    }
+
+    /**
+     * What the workflow engine still knows about one task, looked up once and shared.
+     *
+     * <p>Getting from a task NODE to its process takes two engine round trips, because the node
+     * stores a {@code taskId} but no process id and {@code getWorkflowTask} has to answer that
+     * first. {@link TaskBoardRequestContext#workflow} already memoizes the second trip across
+     * rows, since every review task of one publication resolves the identical process; this
+     * holder memoizes the first, which is per task and so has no sibling to share it with.
+     *
+     * <p>Both fields are nullable and {@link #NONE} carries neither: a plain {@code jnt:task}
+     * never had a process, and a workflow task whose process has ended no longer resolves one.
+     * Neither is an error -- the fields reading this degrade to null or to an empty list.
+     */
+    private static final class LiveWorkflow {
+
+        private static final LiveWorkflow NONE = new LiveWorkflow(null, null);
+
+        private final WorkflowTask task;
+        private final Workflow workflow;
+
+        private LiveWorkflow(WorkflowTask task, Workflow workflow) {
+            this.task = task;
+            this.workflow = workflow;
         }
     }
 

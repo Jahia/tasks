@@ -3,7 +3,9 @@ package org.jahia.modules.tasks.graphql;
 import graphql.annotations.annotationTypes.GraphQLDescription;
 import graphql.annotations.annotationTypes.GraphQLField;
 import graphql.annotations.annotationTypes.GraphQLName;
+import org.jahia.api.Constants;
 import org.jahia.services.content.JCRNodeWrapper;
+import org.jahia.services.content.JCRSessionFactory;
 import org.jahia.utils.i18n.JahiaLocaleContextHolder;
 
 import javax.jcr.RepositoryException;
@@ -123,6 +125,43 @@ public class GqlTaskTarget {
      * itself: jContent lists the CHILDREN of the path it is given, so pointing at the content would
      * show what is inside it rather than the content among its siblings.
      */
+    /**
+     * Where to LOOK at this content, as opposed to where to act on it.
+     *
+     * <p>A reviewer answering a publication request wants to see the content rendered, and only a
+     * page renders. This answers the node's own URL when the node is one, the URL of the page
+     * around it when it is not, and null when no page contains it at all -- content in a folder
+     * has nothing to render it.
+     *
+     * <p>Deliberately a different test from {@link #isInPage()}, which asks only about
+     * {@code jnt:page} because it is deciding where an EDIT lands. Rendering is what
+     * {@code jmix:mainResource} declares, so a standalone item carrying that mixin previews as
+     * itself rather than being reported as having nowhere to go.
+     *
+     * <p>Re-resolved through a session carrying a locale, as {@code GqlTaskBoard#getTargetNode()}
+     * has to: the session this type is built from is opened without one, and core's URL builder
+     * then writes a literal "null" where the language segment belongs.
+     */
+    @GraphQLField
+    @GraphQLName("previewUrl")
+    @GraphQLDescription("Where to look at this content rendered: its own URL when it is a page, its containing "
+            + "page's otherwise, and null when no page contains it")
+    public String getPreviewUrl() {
+        try {
+            JCRNodeWrapper renderable = GqlTaskBoard.isRenderablePage(node) ? node : containingPage;
+            if (renderable == null) {
+                return null;
+            }
+
+            JCRNodeWrapper localized = (JCRNodeWrapper) JCRSessionFactory.getInstance()
+                    .getCurrentUserSession(Constants.EDIT_WORKSPACE, JahiaLocaleContextHolder.getLocale())
+                    .getNodeByIdentifier(renderable.getIdentifier());
+            return localized.getUrl();
+        } catch (RepositoryException e) {
+            throw new TaskGraphQLException("Unable to resolve where the target can be previewed", e);
+        }
+    }
+
     @GraphQLField
     @GraphQLName("locationPath")
     @GraphQLDescription("The jContent location that shows this content: its containing page, or its parent folder")

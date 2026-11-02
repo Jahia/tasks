@@ -42,12 +42,31 @@ export const TASK_SCOPES: Array<{label: string; value: TaskScope}> = [
 
 export const DEFAULT_SCOPE: TaskScope = 'assignedToMe';
 
-// The one state whose stored name is not the word to show. "Close" is what the button says, so
+// How the same tasks are laid out: as cards in state columns, or as one sortable table. The board
+// answers "what is moving where", the list answers "what is there, ordered by the column I picked" --
+// so this is a presentation choice over one set of tasks, not a different set, and the scope, search
+// and sort beside it keep their meaning across the switch.
+export type TaskViewMode = 'board' | 'list';
+
+export const DEFAULT_VIEW_MODE: TaskViewMode = 'board';
+
+// Remembered per viewer, not per site: "My Tasks" is one screen about one person, unlike jContent's
+// per-site-per-accordion view mode. Browser-local by design -- a preference worth keeping between
+// visits but not worth a round trip, and the board renders correctly when it comes back empty.
+export const VIEW_MODE_STORAGE_KEY = 'tasks-my-tasks-view-mode';
+
+export const isTaskViewMode = (value: unknown): value is TaskViewMode =>
+    value === 'board' || value === 'list';
+
+// The two states whose stored name is not the word to show. "Close" is what the button says, so
 // "Closed" is what the task has to read as afterwards -- "Finished" would be a second name for
-// the same thing, and the reader has no way to know they are the same. Every other state is shown
-// capitalised as stored (see TaskCard).
+// the same thing, and the reader has no way to know they are the same. "Refuse" and "suspended"
+// are the same case: the only action in this UI that writes "suspended" is Refuse, so that is the
+// word the state has to answer with. Every other state is shown capitalised as stored.
 export const CLOSED_STATE = 'finished';
 export const CLOSED_STATE_LABEL = 'Closed';
+export const REFUSED_STATE = 'suspended';
+export const REFUSED_STATE_LABEL = 'Refused';
 
 export type BoardColumn = {
     key: ColumnKey;
@@ -65,7 +84,7 @@ export type BoardColumn = {
  *
  * **Where "suspended" went.** A refused task is parked, not progressed and not done, so it belongs
  * with the work that has not been started -- this column is "not started yet", of which "active"
- * is the ordinary case and "suspended" the parked one. It keeps its own Suspended chip, so the two
+ * is the ordinary case and "suspended" the parked one. It keeps its own Refused chip, so the two
  * are still told apart inside the column. Giving it a fourth column would say it is a stage of its
  * own, which it is not.
  *
@@ -129,6 +148,28 @@ export const initialBoardVariables = (pageSize: number) => ({
 });
 
 /**
+ * How many of a publication request's items a card asks for up front.
+ *
+ * A request can carry hundreds -- a bulk publish is one process -- and every item costs the
+ * server a node lookup, on every row of every column. So the card asks for a readable handful and
+ * `requestItemCount` tells it how many there really are; the rest arrive only if somebody asks for
+ * them, through TASK_REQUEST_ITEMS_QUERY.
+ */
+export const REQUEST_ITEMS_ON_A_CARD = 5;
+
+// Shared by `requestItems` and `targets`, which are the same type answering two questions -- see
+// TaskTarget. Written once so the two selections cannot drift and leave one of them missing a
+// field the card reads off both.
+const TASK_TARGET_FIELDS = /* GraphQL */ `
+    uuid
+    displayName
+    typeName
+    inPage
+    locationPath
+    previewUrl
+`;
+
+/**
  * Everything a card shows. Interpolated into one aliased query per column rather than expressed as
  * a GraphQL fragment: a fragment has to name the type it applies to, and this file is deliberately
  * free of any import from the module library that would tell it what that type is called.
@@ -140,6 +181,7 @@ const TASK_CARD_FIELDS = /* GraphQL */ `
     createdDate
     closedDate
     dueDate
+    priority
     owner
     assigneeDisplayName
     state
@@ -149,12 +191,12 @@ const TASK_CARD_FIELDS = /* GraphQL */ `
     workflowSummary
     viewerRole
     candidateDisplayNames
+    requestItemCount
+    requestItems(limit: ${REQUEST_ITEMS_ON_A_CARD}) {
+        ${TASK_TARGET_FIELDS}
+    }
     targets {
-        uuid
-        displayName
-        typeName
-        inPage
-        locationPath
+        ${TASK_TARGET_FIELDS}
     }
     targetNode {
         url
@@ -254,6 +296,28 @@ export const COMPLETE_TASK_MUTATION = /* GraphQL */ `
     }
 `;
 
+/**
+ * The rest of one task's publication request, for the card that has shown the first few.
+ *
+ * Asks with no limit, so what comes back is every item the viewer may read -- which can still be
+ * fewer than requestItemCount, and that gap is the point: it is the items that are not theirs to
+ * open, and the card says so rather than quietly showing a shorter list.
+ */
+export const TASK_REQUEST_ITEMS_QUERY = /* GraphQL */ `
+    query TaskRequestItems($id: String!) {
+        task(id: $id) {
+            id
+            requestItems {
+                ${TASK_TARGET_FIELDS}
+            }
+        }
+    }
+`;
+
+export type TaskRequestItemsQueryResult = {
+    task: {id: string; requestItems: TaskTarget[]};
+};
+
 export type TaskTarget = {
     uuid: string;
     displayName: string;
@@ -262,6 +326,9 @@ export type TaskTarget = {
     // the page that holds it, or jContent listing the folder that holds it.
     inPage: boolean;
     locationPath: string;
+    // Where to look at this content rendered -- its own page, or the one around it. Null for
+    // content no page contains, which has nothing to render.
+    previewUrl: string | null;
 };
 
 export type TaskBoardNode = {
@@ -274,6 +341,9 @@ export type TaskBoardNode = {
     // existed -- see GqlTaskBoard#getClosedDate.
     closedDate: string | null;
     dueDate: string | null;
+    // "low" | "normal" | "high" as stored, or null. Shown by the list view's Priority column; the
+    // cards do not show it. Not sortable -- see LIST_COLUMN_SORT_ARGUMENT.
+    priority: string | null;
     owner: string | null;
     assigneeDisplayName: string | null;
     state: string | null;
@@ -291,6 +361,12 @@ export type TaskBoardNode = {
     // Every node the task references, named rather than pathed - see GqlTaskTarget. `targetNode`
     // stays for the preview link: it resolves to a page, which is the only thing with a URL.
     targets: TaskTarget[];
+    // How many items the publication request behind this task covers, or null when there is no
+    // request: a plain task, or a workflow task whose process has ended. The engine's own count,
+    // so requestItems can legitimately be shorter -- see GqlTaskBoard#getRequestItems.
+    requestItemCount: number | null;
+    // The first REQUEST_ITEMS_ON_A_CARD of them. Empty whenever requestItemCount is null.
+    requestItems: TaskTarget[];
     targetNode: {url: string; property: {value: string} | null} | null;
 };
 
@@ -305,6 +381,32 @@ export type TaskBoardConnection = {
 
 // One connection per column, keyed by the aliases columnSelection() emits.
 export type TaskBoardQueryResult = Record<ColumnKey, TaskBoardConnection>;
+
+/**
+ * The same tasks as the board, in one connection instead of three.
+ *
+ * The list view shows every state together in one sortable table, so it asks for the same
+ * taskBoard field with no filterState at all -- TaskBoardQueryExtensions#appendStateFilter adds no
+ * clause for an empty one, which is exactly "every state". Search, sort and scope are the same
+ * bind variables the board sends, so switching view keeps the toolbar's meaning.
+ */
+export const TASK_LIST_QUERY = /* GraphQL */ `
+    query TaskList($limit: Int!, $offset: Int!, $search: String, $sortBy: String, $sortOrder: String, $scope: String) {
+        tasks: taskBoard(limit: $limit, offset: $offset, search: $search, sortBy: $sortBy, sortOrder: $sortOrder, scope: $scope) {
+            pageInfo {
+                hasNextPage
+                totalCount
+            }
+            edges {
+                node {
+                    ${TASK_CARD_FIELDS}
+                }
+            }
+        }
+    }
+`;
+
+export type TaskListQueryResult = {tasks: TaskBoardConnection};
 
 export type InitialTaskBoardQueryResult = TaskBoardQueryResult & {
     taskBoardCurrentUserKey: string;

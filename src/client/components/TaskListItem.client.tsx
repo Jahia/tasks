@@ -5,6 +5,7 @@ import {callGraphQL} from '../lib/graphqlClient';
 import {
     ASSIGN_TASK_TO_ME_MUTATION,
     COMPLETE_TASK_MUTATION,
+    REFUSED_STATE,
     RESUME_TASK_MUTATION,
     SUSPEND_TASK_MUTATION,
     UNASSIGN_TASK_MUTATION
@@ -51,10 +52,12 @@ function buildActions(task: TaskNode, canAct: boolean, currentUserKey: string): 
         actions.push({label: 'Assign to me', mutation: ASSIGN_TASK_TO_ME_MUTATION, variables: {id: task.id}, patch: {owner: currentUserKey}});
     }
 
-    // Matches TaskBoard.client.tsx's TaskActions: a suspended task can only be resumed, not
-    // unassigned directly -- Refuse is only offered while active or started.
+    // "Unassign", not "Refuse": this hands the task back to the pool, which is what TaskActions
+    // calls Unassign. It used to say Refuse, so the same word named two different transitions --
+    // this one to active-and-unowned, TaskActions' to suspended. A refused task can only be
+    // resumed, not unassigned directly, so this is offered while active or started.
     if (canAct && (task.state === 'active' || task.state === 'started')) {
-        actions.push({label: 'Refuse', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
+        actions.push({label: 'Unassign', mutation: UNASSIGN_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'active', owner: ''}});
     }
 
     if (canAct && task.state === 'active') {
@@ -62,12 +65,14 @@ function buildActions(task: TaskNode, canAct: boolean, currentUserKey: string): 
     }
 
     if (canAct && task.state === 'started') {
-        actions.push({label: 'Suspend', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'suspended'}});
+        // "Refuse", matching TaskActions and TaskDetail: one name for the transition into
+        // REFUSED_STATE, so the chip the task then shows is the same word as the button.
+        actions.push({label: 'Refuse', mutation: SUSPEND_TASK_MUTATION, variables: {id: task.id}, patch: {state: REFUSED_STATE}});
         actions.push(...buildCompletionActions(task));
     }
 
-    if (canAct && task.state === 'suspended') {
-        actions.push({label: 'Continue', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'started'}});
+    if (canAct && task.state === REFUSED_STATE) {
+        actions.push({label: 'Resume', mutation: RESUME_TASK_MUTATION, variables: {id: task.id}, patch: {state: 'started'}});
     }
 
     return actions;
