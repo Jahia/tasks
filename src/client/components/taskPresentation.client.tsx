@@ -13,10 +13,12 @@ import {
     CLOSED_STATE,
     CLOSED_STATE_LABEL,
     COMPLETE_TASK_MUTATION,
+    REFUSED_STATE,
+    REFUSED_STATE_LABEL,
     RESUME_TASK_MUTATION,
     UNASSIGN_TASK_MUTATION
 } from './taskBoard.shared';
-import type {TaskBoardNode, TaskTarget} from './taskBoard.shared';
+import type {TaskBoardNode, TaskScope, TaskTarget} from './taskBoard.shared';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
 import './TaskBoard.client.css';
 
@@ -33,9 +35,15 @@ export const STATE_CHIP_COLOR: Record<string, ChipColor> = {
     finished: 'light'
 };
 
-// What a state is called on the card. Only one state needs an entry -- see CLOSED_STATE_LABEL.
+// What a state is called on the card. Two states are named after the action that writes them
+// rather than after the value stored -- see CLOSED_STATE_LABEL and REFUSED_STATE_LABEL.
+const STATE_LABEL: Record<string, string> = {
+    [CLOSED_STATE]: CLOSED_STATE_LABEL,
+    [REFUSED_STATE]: REFUSED_STATE_LABEL
+};
+
 export function stateLabel(state: string | null): string {
-    return state === CLOSED_STATE ? CLOSED_STATE_LABEL : capitalize(state);
+    return (state !== null && STATE_LABEL[state]) || capitalize(state);
 }
 
 // One button per outcome the task actually declares (workflow-specific --
@@ -195,6 +203,23 @@ export function preferListView(site: string, mode: string): void {
 }
 
 /**
+ * Which of the two people on a task is worth naming, given the list being looked at.
+ *
+ * Every scope pins one of them to the viewer: "Assigned to me" fixes the holder, "Tasks I've
+ * created" fixes the raiser, and a claimable task has no holder at all. Naming the pinned one
+ * says only "you", so each list shows the OTHER party -- which is the one piece of information
+ * the scope has not already given away. Shared by the board card and the list column so the two
+ * cannot drift apart on it.
+ */
+export const counterpartyLabel = (scope: TaskScope): string =>
+    (scope === 'createdByMe' ? 'Assigned to' : 'Assigned by');
+
+export const counterpartyName = (task: TaskBoardNode, scope: TaskScope): string =>
+    (scope === 'createdByMe'
+        ? task.assigneeDisplayName ?? 'Unassigned'
+        : task.creator ?? 'Unknown');
+
+/**
  * How urgent a due date is, as one of three states the card colours.
  *
  * Late is anything in the past; soon is inside a week. Everything further out is "ok", which
@@ -279,6 +304,15 @@ export type TaskActionsProps = {
     currentUserKey: string;
     canReviewAll: boolean;
     isBusy: boolean;
+    /**
+     * Whether this row's actions include Preview.
+     *
+     * A board card listing a publication request puts Preview on each item instead, where it says
+     * which item it opens; one more at the bottom of the card would open the first item again
+     * under a label that does not admit it. Everywhere else -- the list's Actions column, the task
+     * detail -- there is no per-item list to carry it, so it stays here.
+     */
+    offerPreview?: boolean;
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
 };
 
@@ -286,7 +320,7 @@ export type TaskActionsProps = {
 // always-on-screen buttons now instead of a 3-dot menu. TaskBoardMutationExtensions
 // independently re-checks every one of these server-side and is the real security boundary; a
 // wrong guess here just surfaces as an error banner.
-export function TaskActions({task, currentUserKey, canReviewAll, isBusy, onAction}: Readonly<TaskActionsProps>) {
+export function TaskActions({task, currentUserKey, canReviewAll, isBusy, offerPreview = true, onAction}: Readonly<TaskActionsProps>) {
     const canAct = task.owner === currentUserKey || canReviewAll;
     // Closed is the end of the line: nothing can be started, refused, unassigned or closed again,
     // and none of the state branches below match it. Returning early states that outright rather
@@ -332,7 +366,9 @@ export function TaskActions({task, currentUserKey, canReviewAll, isBusy, onActio
     const refuse: MenuAction = {
         label: 'Refuse',
         mutation: UPDATE_TASK_STATE_MUTATION,
-        variables: {id: task.id, state: 'suspended'}
+        // REFUSED_STATE rather than the bare string: this action and the chip the task then shows
+        // have to stay two names for one thing, which is what REFUSED_STATE_LABEL encodes.
+        variables: {id: task.id, state: REFUSED_STATE}
     };
 
     if (task.state === 'active' && isUnassigned) {
@@ -356,7 +392,7 @@ export function TaskActions({task, currentUserKey, canReviewAll, isBusy, onActio
         if (isPlainTask) {
             primaryActions.push(close);
         }
-        showPreview = true;
+        showPreview = offerPreview;
         // Reject publication before Publish, matching the requested layout order, regardless of
         // the order possibleOutcomes happens to list them in (workflow-definition-specific).
         const outcomes = task.possibleOutcomes

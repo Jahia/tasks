@@ -21,14 +21,6 @@
     overflow-y: auto;
 }
 
-.task-board__toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: var(--spacing-medium);
-}
-
 /* The count and the three list badges, which read as one sentence: "5 task(s), assigned to me". */
 .task-board__scopes {
     display: flex;
@@ -67,70 +59,26 @@
     color: var(--color-light);
 }
 
+/* Header's toolbar slot is a single row, so these wrap rather than overflow it when the window
+   is narrow and the sort control is showing. */
 .task-board__toolbar-controls {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: var(--spacing-large);
-}
-
-.task-board__sort,
-.task-board__search {
-    display: flex;
-    align-items: center;
+    justify-content: flex-end;
     gap: var(--spacing-small);
 }
 
-.task-board__search-input {
-    width: 260px;
-}
-
-/* Two segments of one control, so they sit against each other with a shared border rather than
-   the gap the scope pills have between them: those are five independent choices, these are the
-   two halves of a switch. */
-.task-board__views {
+.task-board__sort {
     display: flex;
     align-items: center;
+    gap: var(--spacing-nano, 2px);
 }
 
-.task-board__view {
-    padding: 2px var(--spacing-small);
-    border: 1px solid var(--color-gray_light);
-    background-color: transparent;
-    color: var(--color-gray_dark);
-    font: inherit;
-    font-size: var(--fontSize-caption, 12px);
-    cursor: pointer;
-}
-
-.task-board__view:first-child {
-    border-radius: 3px 0 0 3px;
-}
-
-/* Collapses the shared edge, so the pair reads as one control two segments wide rather than two
-   buttons that happen to touch. */
-.task-board__view:last-child {
-    margin-left: -1px;
-    border-radius: 0 3px 3px 0;
-}
-
-.task-board__view:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-}
-
-/* Filled, matching the selected scope pill: which view is showing has to be readable at a glance
-   from across the toolbar, and a border-colour change alone is not. */
-.task-board__view--selected {
-    border-color: var(--color-accent);
-    background-color: var(--color-accent);
-    color: var(--color-light);
-    /* Above its neighbour's un-collapsed edge, so the filled segment keeps a full border. */
-    position: relative;
-}
-
-.task-board__view--selected:hover {
-    color: var(--color-light);
+/* Narrower than the 260px it had in the full-width toolbar below the header: in the header slot
+   it shares one row with the sort and view controls. */
+.task-board__search-input {
+    width: 200px;
 }
 
 /* --- List view ------------------------------------------------------------------------------ */
@@ -156,10 +104,6 @@
     align-items: flex-start;
 }
 
-.task-list__show-more {
-    display: flex;
-    justify-content: center;
-}
 
 .task-board__list {
     display: flex;
@@ -379,6 +323,22 @@
  * button that lands on it. A list rather than a paragraph because it is a list - most tasks raised
  * from the Content Types accordion point at several records.
  */
+/*
+ * The line that says the list below is a publication request's contents rather than the task's
+ * own target. Quiet, because it is a label for the rows and not a second title: the rows are what
+ * the reviewer reads.
+ */
+.task-board__targets-heading {
+    margin: 0;
+    color: var(--color-gray, #7a7f88);
+}
+
+/* What the list could not say by itself: the items the viewer is not allowed to open. */
+.task-board__targets-note {
+    margin: 0;
+    color: var(--color-gray, #7a7f88);
+}
+
 .task-board__targets {
     display: flex;
     flex-direction: column;

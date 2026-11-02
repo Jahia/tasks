@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {ArrowDown, ArrowUp, Banner, Button, Chip, Dropdown, EmptyData, Header, Input, Loader, Search, Typography} from '@jahia/moonstone';
+import type {ReactElement} from 'react';
+import {ArrowDown, ArrowUp, Banner, Button, Chip, Dropdown, EmptyData, Header, Input, Loader, Search, Typography, ViewColumn, ViewList} from '@jahia/moonstone';
 // Deep import, not the package's bare '@jahia/moonstone-alpha' entry point: that barrel
 // (dist/components/index.js) re-exports Checkbox/DatePicker/etc. too, which drag in transitive
 // deps (e.g. @react-aria/focus) this module never installs and doesn't otherwise need -- see
@@ -37,9 +38,13 @@ import type {
 import {announceCreatedListViewed, announceTaskClosed} from '../lib/closedTaskAlerts';
 import {announceTaskChanged} from '../lib/assignedTaskAlerts';
 import {UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {TASK_REQUEST_ITEMS_QUERY} from './taskBoard.shared';
+import type {TaskRequestItemsQueryResult, TaskTarget} from './taskBoard.shared';
 import {
     descriptionWithoutPaths,
     dueTone,
+    counterpartyLabel,
+    counterpartyName,
     formatCreatedDate,
     formatDueDate,
     jcontentLanguage,
@@ -54,8 +59,14 @@ import './TaskBoard.client.css';
 
 export const DEFAULT_PAGE_SIZE = 25;
 
-// How many more rows a column's "show more" asks for each time.
+// How many more rows a column's "show more" asks for each time. The board keeps that idiom: its
+// three columns grow independently and a page number across them would mean nothing. Only the
+// list, which is one ordered sequence, is paged.
 const SHOW_MORE_STEP = DEFAULT_PAGE_SIZE;
+
+// Moonstone's Pagination defaults to exactly these and throws if itemsPerPage is not one of them,
+// so they are stated here rather than left implicit.
+const LIST_PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 // One stable object, not a fresh one per reset: setLimits(DEFAULT_LIMITS) when the limits already
 // ARE the defaults has to be a no-op, or every change of search/sort/scope would fetch twice --
@@ -80,10 +91,20 @@ const SEARCH_DEBOUNCE_MS = 350;
 type SortField = 'jcr:created' | 'title' | 'creator' | 'owner' | 'state' | 'dueDate';
 type SortDirection = 'ascending' | 'descending';
 
-const VIEW_MODE_OPTIONS: Array<{label: string; value: TaskViewMode}> = [
-    {label: 'Board', value: 'board'},
-    {label: 'List', value: 'list'}
-];
+// Same icons jContent's ViewModeSelector uses, so the two controls read as one family: ViewList
+// for the flat list, and ViewColumn for the board -- a board IS columns, and jContent spends
+// ViewTree on its structured view.
+const VIEW_MODE_ICONS: Record<TaskViewMode, ReactElement> = {
+    board: <ViewColumn/>,
+    list: <ViewList/>
+};
+
+const VIEW_MODE_OPTIONS: Array<{label: string; value: TaskViewMode; iconStart: ReactElement}> =
+    (['board', 'list'] as const).map(value => ({
+        label: value === 'board' ? 'Board' : 'List',
+        value,
+        iconStart: VIEW_MODE_ICONS[value]
+    }));
 
 const SORT_OPTIONS: Array<{label: string; value: SortField}> = [
     {label: 'Creation date', value: 'jcr:created'},
@@ -111,12 +132,16 @@ type TaskCardProps = {
     canReviewAll: boolean;
     isBusy: boolean;
     canDrag: boolean;
+    /** Which list is on screen -- it decides which of the task's two people the card names. */
+    scope: TaskScope;
+    /** Needed by the card itself, to fetch the rest of a publication request on demand. */
+    graphqlEndpoint: string;
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
     onDragStart: () => void;
     onDragEnd: () => void;
 };
 
-function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction, onDragStart, onDragEnd}: Readonly<TaskCardProps>) {
+function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, scope, graphqlEndpoint, onAction, onDragStart, onDragEnd}: Readonly<TaskCardProps>) {
     const targetTitle = task.targetNode?.property?.value;
     const createdDate = formatCreatedDate(task.createdDate);
     const closedDate = formatCreatedDate(task.closedDate);
@@ -141,6 +166,45 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
     // card up as urgent would be the loudest possible version of it.
     const dueHighlight = !isClosed && (tone === 'soon' || tone === 'late') ? ` task-board__card--due-${tone}` : '';
 
+    /*
+     * What this card lists, and why it is not always `targets`.
+     *
+     * A publication request is one process covering a whole selection, but the task the engine
+     * raises from it records only the selection's FIRST entry -- core's WorkflowService#startProcess
+     * keeps the rest in a `nodeIds` process variable and JBPMTaskLifeCycleEventListener writes just
+     * `nodeId` onto the node. So for a workflow task `targets`, which reads that property, names
+     * one item out of however many are actually waiting, and `requestItems` is the real list (see
+     * GqlTaskBoard#getRequestItems). A plain task has no request at all and keeps its targets.
+     *
+     * The decision stays one decision either way: the outcome belongs to the process, not to an
+     * item, which is why Publish/Reject are at the foot of the card and never on a row.
+     */
+    const [extraItems, setExtraItems] = useState<TaskTarget[] | null>(null);
+    const [isExpanding, setIsExpanding] = useState(false);
+    const [expandError, setExpandError] = useState<string | null>(null);
+    const requestCount = task.requestItemCount;
+    const hasRequest = requestCount !== null && requestCount !== undefined;
+    const items = extraItems ?? (hasRequest ? task.requestItems : task.targets);
+    // Items the card is not showing. Before expanding that is just the ones it did not ask for;
+    // after expanding it is the ones the viewer is not allowed to read, which is a different
+    // sentence -- see the two branches below the list.
+    const unshown = hasRequest ? requestCount - items.length : 0;
+
+    const showEveryItem = useCallback(async () => {
+        setIsExpanding(true);
+        setExpandError(null);
+        try {
+            const data = await callGraphQL<TaskRequestItemsQueryResult>(
+                graphqlEndpoint, TASK_REQUEST_ITEMS_QUERY, {id: task.id}
+            );
+            setExtraItems(data.task.requestItems);
+        } catch (error) {
+            setExpandError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setIsExpanding(false);
+        }
+    }, [graphqlEndpoint, task.id]);
+
     return (
         <div
             className={`task-board__card${isClosed ? ' task-board__card--closed' : ''}${dueHighlight}${canDrag ? ' task-board__card--draggable' : ''}`}
@@ -157,12 +221,14 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
             }}
             onDragEnd={onDragEnd}
         >
-            {/* Who raised it and who has it, on one line. "Assigned to" rather than "Owner":
-                nobody owns a task, and the property behind it is the assignee. */}
+            {/* The other party and the dates, on one line. Only the party the scope has not already
+                pinned to the viewer is named -- see counterpartyLabel -- because in "Tasks I've
+                created" every card would otherwise read "Created by: me", which is the one thing
+                the list already said. */}
             <Typography component="p" variant="caption" weight="light" className="task-board__meta">
                 {[
-                    `Created by: ${task.creator ?? 'Unknown'}${createdDate ? `, on ${createdDate}` : ''}`,
-                    `Assigned to: ${task.assigneeDisplayName ?? 'Unassigned'}`,
+                    `${counterpartyLabel(scope)}: ${counterpartyName(task, scope)}`,
+                    ...(createdDate ? [`Raised on ${createdDate}`] : []),
                     // Last, and only once there is one: the card reads in the order the task
                     // lived -- raised, handed to somebody, done.
                     ...(closedDate ? [`Closed on ${closedDate}`] : [])
@@ -201,12 +267,17 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
                     {summaryLine}
                 </Typography>
             )}
-            {/* What the task is about, named rather than pathed. One row per referenced node:
-                targetNode is multi-valued and most tasks raised from the Content Types accordion
-                point at several records. */}
-            {task.targets.length > 0 && (
+            {/* What the task is about, named rather than pathed -- one row per item. For a
+                publication request that is every item the request covers, not the one the task
+                node happens to name; see the comment on `items` above. */}
+            {hasRequest && (
+                <Typography component="p" variant="caption" weight="semiBold" className="task-board__targets-heading">
+                    {requestCount === 1 ? 'In this request' : `In this request (${requestCount})`}
+                </Typography>
+            )}
+            {items.length > 0 && (
                 <ul className="task-board__targets">
-                    {task.targets.map(target => {
+                    {items.map(target => {
                         const location = locationUrl(target, language);
                         return (
                             <li key={target.uuid} className="task-board__target">
@@ -216,6 +287,20 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
                                 <Typography component="span" variant="caption" weight="light">
                                     {target.typeName}
                                 </Typography>
+                                {/* Per item, not per card: a reviewer answering a request has
+                                    several things to look at, and a single Preview at the foot of
+                                    the card could only ever open one of them -- under a label that
+                                    did not say which. TaskActions drops its own Preview when the
+                                    card is showing this list (offerPreview below). */}
+                                {target.previewUrl && !isClosed && (
+                                    <Button
+                                        size="default"
+                                        variant="ghost"
+                                        label="Preview"
+                                        data-sel-role="target-preview"
+                                        onClick={() => window.open(target.previewUrl!, '_blank', 'noopener,noreferrer')}
+                                    />
+                                )}
                                 {/* No Edit on a closed task: the content is still named, because
                                     that is the record of what the work was about, but there is
                                     nothing left to do to it from here. The live cards keep it. */}
@@ -246,11 +331,36 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, onAction
                     })}
                 </ul>
             )}
+            {/* Not yet expanded: the rest of the request is a fetch away. */}
+            {unshown > 0 && extraItems === null && (
+                <Button
+                    size="small"
+                    variant="ghost"
+                    label={isExpanding ? 'Loading...' : `Show all ${requestCount}`}
+                    isDisabled={isExpanding}
+                    data-sel-role="request-show-all"
+                    onClick={showEveryItem}
+                />
+            )}
+            {/* Already expanded and still short: the gap is what the viewer may not read. Said
+                outright rather than left as a shorter list, which would read as the whole request
+                and quietly understate what the decision covers. */}
+            {unshown > 0 && extraItems !== null && (
+                <Typography component="p" variant="caption" weight="light" className="task-board__targets-note">
+                    {`${unshown} of the ${requestCount} items in this request are not yours to open`}
+                </Typography>
+            )}
+            {expandError && (
+                <Typography component="p" variant="caption" className="task-board__targets-note">
+                    {`Could not load the rest of this request: ${expandError}`}
+                </Typography>
+            )}
             <TaskActions
                 task={task}
                 currentUserKey={currentUserKey}
                 canReviewAll={canReviewAll}
                 isBusy={isBusy}
+                offerPreview={!hasRequest}
                 onAction={onAction}
             />
         </div>
@@ -310,6 +420,10 @@ type BoardColumnViewProps = {
     currentUserKey: string;
     canReviewAll: boolean;
     busyTaskId: string | null;
+    /** Passed straight through to each card -- see TaskCardProps#scope. */
+    scope: TaskScope;
+    /** Passed straight through to each card -- see TaskCardProps#graphqlEndpoint. */
+    graphqlEndpoint: string;
     dragging: DragState | null;
     isUnderPointer: boolean;
     onAction: (mutation: string, variables: Record<string, unknown>) => void;
@@ -321,7 +435,8 @@ type BoardColumnViewProps = {
 };
 
 function BoardColumnView({
-    column, connection, currentUserKey, canReviewAll, busyTaskId, dragging, isUnderPointer,
+    column, connection, currentUserKey, canReviewAll, busyTaskId, scope, graphqlEndpoint,
+    dragging, isUnderPointer,
     onAction, onDragStart, onDragEnd, onHover, onDrop, onShowMore
 }: Readonly<BoardColumnViewProps>) {
     const rows = connection.edges.map(edge => edge.node);
@@ -378,6 +493,8 @@ function BoardColumnView({
                         // Same test the card's own buttons use: somebody who cannot act on a task
                         // cannot move it either, so it does not offer a drag that would be refused.
                         canDrag={task.owner === currentUserKey || canReviewAll}
+                        scope={scope}
+                        graphqlEndpoint={graphqlEndpoint}
                         onAction={onAction}
                         onDragStart={() => onDragStart({task, from: column.key})}
                         onDragEnd={onDragEnd}
@@ -436,7 +553,10 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
     // from the other -- the board's pages are per column, so joining them would show whatever each
     // column happened to have fetched rather than the first N tasks overall.
     const [list, setList] = useState<TaskBoardConnection | null>(null);
-    const [listLimit, setListLimit] = useState(DEFAULT_PAGE_SIZE);
+    // The list is paged rather than grown: a page size and a 1-based page number, sent to the
+    // connection as limit/offset. Both are needed in the query, so both live here.
+    const [listPageSize, setListPageSize] = useState(DEFAULT_PAGE_SIZE);
+    const [listPage, setListPage] = useState(1);
     // The card in hand, whole rather than by id: deciding which columns will take it needs its
     // assignee and its node type, not just which row it is.
     //
@@ -479,7 +599,8 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
                 // them together and sorts across them -- a sort that only ordered within each
                 // column would not be a sorted list at all.
                 const data = await callGraphQL<TaskListQueryResult>(graphqlEndpoint, TASK_LIST_QUERY, {
-                    first: listLimit,
+                    limit: listPageSize,
+                    offset: (listPage - 1) * listPageSize,
                     ...shared
                 });
                 setList(data.tasks);
@@ -498,7 +619,7 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
         } finally {
             setLoading(false);
         }
-    }, [graphqlEndpoint, viewMode, limits, listLimit, search, sortBy, sortOrder, scope]);
+    }, [graphqlEndpoint, viewMode, limits, listPageSize, listPage, search, sortBy, sortOrder, scope]);
 
     // Every input to the query is already in loadBoard's dependency list, so "re-fetch when
     // something changed" is exactly "re-fetch when loadBoard changed" -- there is no second list
@@ -583,15 +704,23 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
         setLimits(current => ({...current, [key]: current[key] + SHOW_MORE_STEP}));
     }, []);
 
-    const showMoreInList = useCallback(() => {
-        setListLimit(current => current + SHOW_MORE_STEP);
+    // The chosen page size is a preference and survives; only the position in the sequence is
+    // meaningless once the sequence changes.
+    const changeListPage = useCallback((page: number) => {
+        setListPage(page);
+    }, []);
+
+    const changeListPageSize = useCallback((size: number) => {
+        setListPageSize(size);
+        setListPage(1);
     }, []);
 
     // Changing what the board is showing puts every column back to one page: a limit raised on the
-    // old list means nothing on the new one. Same for the list's own single limit.
+    // old list means nothing on the new one. Same for where the list was scrolled to -- page 4 of
+    // the previous search is not page 4 of this one.
     const resetPaging = () => {
         setLimits(DEFAULT_LIMITS);
-        setListLimit(DEFAULT_PAGE_SIZE);
+        setListPage(1);
     };
 
     const changeScope = (next: TaskScope) => {
@@ -619,7 +748,7 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
     const changeListSort = useCallback((nextSortBy: string, nextSortOrder: SortDirection) => {
         setSortBy(nextSortBy as SortField);
         setSortOrder(nextSortOrder);
-        setListLimit(DEFAULT_PAGE_SIZE);
+        setListPage(1);
     }, []);
 
     const changeViewMode = (next: TaskViewMode) => {
@@ -669,11 +798,17 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
                 canReviewAll={canReviewAll}
                 busyTaskId={busyTaskId}
                 showCandidates={scope === 'claimable'}
+                scope={scope}
                 sortBy={sortBy}
                 sortOrder={sortOrder}
                 onSortChange={changeListSort}
                 onAction={handleAction}
-                onShowMore={list.pageInfo.hasNextPage ? showMoreInList : null}
+                totalCount={totalCount}
+                page={listPage}
+                pageSize={listPageSize}
+                pageSizeOptions={LIST_PAGE_SIZE_OPTIONS}
+                onPageChange={changeListPage}
+                onPageSizeChange={changeListPageSize}
             />
         );
     } else {
@@ -687,6 +822,8 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
                         currentUserKey={currentUserKey}
                         canReviewAll={canReviewAll}
                         busyTaskId={busyTaskId}
+                        scope={scope}
+                        graphqlEndpoint={graphqlEndpoint}
                         dragging={dragging}
                         isUnderPointer={dropTarget === column.key}
                         onAction={handleAction}
@@ -706,68 +843,52 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
             paper
             header={(
                 <div style={{backgroundColor: 'white'}}>
-                    <Header title={title}/>
-                </div>
-            )}
-            content={(
-                <div className="task-board__content">
-                    <div className="task-board__toolbar">
-                        <div className="task-board__scopes" role="group" aria-label="Which tasks to show">
-                            <Typography variant="caption" weight="light">{totalCount} task(s)</Typography>
-                            {TASK_SCOPES.map(option => (
-                                <button
-                                    key={option.value}
-                                    type="button"
-                                    className={`task-board__scope${scope === option.value ? ' task-board__scope--selected' : ''}`}
-                                    // aria-pressed rather than aria-selected: these are toggle
-                                    // buttons in a group, not tabs over one panel of content.
-                                    aria-pressed={scope === option.value}
-                                    onClick={() => changeScope(option.value)}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="task-board__toolbar-controls">
-                            {/* Hidden in the list, deliberately: there the sortable column headers
-                                are the sort control, and a dropdown beside them would be a second
-                                one for the same setting -- two places showing the same state, which
-                                is how they end up disagreeing. */}
-                            {!isList && (
-                                <div className="task-board__sort">
-                                    <Typography variant="body" weight="semiBold">Sort by:</Typography>
-                                    <Dropdown
-                                        size="small"
-                                        data={SORT_OPTIONS}
-                                        value={sortBy}
-                                        onChange={(_event, item) => changeSortBy(item.value as SortField)}
-                                    />
-                                    <Button
-                                        icon={sortOrder === 'descending' ? <ArrowDown/> : <ArrowUp/>}
-                                        variant="ghost"
-                                        size="small"
-                                        aria-label={sortOrder === 'descending' ? 'Sort ascending' : 'Sort descending'}
-                                        onClick={toggleSortOrder}
-                                    />
-                                </div>
-                            )}
-                            {/* Same toggle-button idiom as the scopes above: two alternative
-                                answers to one question, so aria-pressed rather than tabs. */}
-                            <div className="task-board__views" role="group" aria-label="How to show the tasks">
-                                {VIEW_MODE_OPTIONS.map(option => (
+                    <Header
+                        title={title}
+                        // The scope of what is listed sits left and what is done to that list sits
+                        // right, which is how jContent's ContentHeader splits the same two jobs.
+                        toolbarLeft={(
+                            <div className="task-board__scopes" role="group" aria-label="Which tasks to show">
+                                <Typography variant="caption" weight="light">{totalCount} task(s)</Typography>
+                                {TASK_SCOPES.map(option => (
                                     <button
                                         key={option.value}
                                         type="button"
-                                        className={`task-board__view${viewMode === option.value ? ' task-board__view--selected' : ''}`}
-                                        aria-pressed={viewMode === option.value}
-                                        onClick={() => changeViewMode(option.value)}
+                                        className={`task-board__scope${scope === option.value ? ' task-board__scope--selected' : ''}`}
+                                        // aria-pressed rather than aria-selected: these are toggle
+                                        // buttons in a group, not tabs over one panel of content.
+                                        aria-pressed={scope === option.value}
+                                        onClick={() => changeScope(option.value)}
                                     >
                                         {option.label}
                                     </button>
                                 ))}
                             </div>
-                            <div className="task-board__search">
-                                <Typography variant="body" weight="semiBold">Search:</Typography>
+                        )}
+                        toolbarRight={(
+                            <div className="task-board__toolbar-controls">
+                                {/* Hidden in the list, deliberately: there the sortable column
+                                    headers are the sort control, and a dropdown beside them would
+                                    be a second one for the same setting -- two places showing the
+                                    same state, which is how they end up disagreeing. */}
+                                {!isList && (
+                                    <div className="task-board__sort">
+                                        <Dropdown
+                                            size="small"
+                                            data={SORT_OPTIONS}
+                                            value={sortBy}
+                                            label="Sort by"
+                                            onChange={(_event, item) => changeSortBy(item.value as SortField)}
+                                        />
+                                        <Button
+                                            icon={sortOrder === 'descending' ? <ArrowDown/> : <ArrowUp/>}
+                                            variant="ghost"
+                                            size="small"
+                                            aria-label={sortOrder === 'descending' ? 'Sort ascending' : 'Sort descending'}
+                                            onClick={toggleSortOrder}
+                                        />
+                                    </div>
+                                )}
                                 <Input
                                     className="task-board__search-input"
                                     icon={<Search/>}
@@ -775,9 +896,26 @@ export default function TaskBoard({title, initialColumns, graphqlEndpoint, curre
                                     value={searchInput}
                                     onChange={e => setSearchInput(e.target.value)}
                                 />
+                                {/* The same control jContent's ViewModeSelector is: a Dropdown
+                                    whose trigger carries the current view's icon. Not a pair of
+                                    toggle buttons -- a reader who has switched view in jContent
+                                    should recognise this one without being taught it again. */}
+                                <Dropdown
+                                    size="small"
+                                    className="task-board__views"
+                                    data={VIEW_MODE_OPTIONS}
+                                    value={viewMode}
+                                    icon={VIEW_MODE_ICONS[viewMode]}
+                                    aria-label="How to show the tasks"
+                                    onChange={(_event, item) => changeViewMode(item.value as TaskViewMode)}
+                                />
                             </div>
-                        </div>
-                    </div>
+                        )}
+                    />
+                </div>
+            )}
+            content={(
+                <div className="task-board__content">
                     {error && (
                         <Banner title="Something went wrong" variant="danger">
                             {error}
