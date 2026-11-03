@@ -145,9 +145,10 @@
                     <c:if test="${fn:startsWith(outcomeLabel, '???')}"><fmt:message bundle="${taskBundle}"
                                                                                     var="outcomeLabel"
                                                                                     key="${fn:replace(currentNode.properties['taskName'].string,' ','.')}.${fn:replace(fn:toLowerCase(outcome.string),' ','.')}"/></c:if>
+                    <c:set var="outcomeHref" value="${fn:escapeXml(fn:replace(functions:escapeJavaScript(outcome.string), '%', '%25'))}"/>
                     <li><a class="taskaction taskaction-start"
-                           href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','finished','${outcome.string}','${reloadUrlHref}')"
-                           title="${outcome.string}">${outcomeLabel}</a></li>
+                           href="javascript:sendNewStatus('${currentNode.identifier}','${taskPathHref}','finished','${outcomeHref}','${reloadUrlHref}')"
+                           title="${fn:escapeXml(outcome.string)}">${fn:escapeXml(outcomeLabel)}</a></li>
                 </c:forEach>
             </c:if>
             <c:if test="${empty currentNode.properties['possibleOutcomes']}">
