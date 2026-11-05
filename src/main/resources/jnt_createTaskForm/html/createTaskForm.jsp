@@ -118,7 +118,7 @@
                       action="<c:url value='${url.basePreview}${bindedComponent.path}/tasks/*'/>">
                     <input type="hidden" name="jcrNodeType" value="jnt:task">
                     <input type="hidden" name="jcrParentType" value="jnt:tasks">
-                    <input type="hidden" name="type" value="${taskType}"/>
+                    <input type="hidden" name="type" value="${fn:escapeXml(taskType)}"/>
                     <input type="hidden" name="jcrRedirectTo"
                            value="<c:url value='${url.base}${functions:escapePath(renderContext.mainResource.node.path)}.${renderContext.mainResource.template}'/>">
 
