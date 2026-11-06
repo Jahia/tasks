@@ -68,6 +68,7 @@
 <c:set var="taskPathHref" value="${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}"/>
 <c:set var="reloadUrlJs" value="${functions:escapeJavaScript(reloadurl)}"/>
 <c:set var="reloadUrlHref" value="${fn:escapeXml(fn:replace(reloadUrlJs, '%', '%25'))}"/>
+<c:set var="userPathHref" value="${fn:escapeXml(fn:replace(functions:escapeJavaScript(currentUser.path), '%', '%25'))}"/>
 <c:set var="identifierName" value="#task_${currentNode.identifier}"/>
 <c:if test="${not renderContext.ajaxRequest}">
     <div class="taskComment${finished ? ' taskCommentResolved' : ''}" id="task_${currentNode.identifier}">
@@ -118,7 +119,7 @@
     <c:choose>
         <c:when test="${currentNode.properties.state.string == 'active' and currentNode.properties['assigneeUserKey'].string ne currentUser.path and assignable eq 'true'}">
             <li><a class="taskaction taskaction-assign"
-                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','${currentUser.path}','${reloadUrlHref}')"
+                   href="javascript:sendNewAssignee('${currentNode.identifier}','${taskPathHref}','${userPathHref}','${reloadUrlHref}')"
                    title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
         </c:when>
         <c:when test="${currentNode.properties.state.string == 'active' and currentNode.properties['assigneeUserKey'].string eq currentUser.path}">
