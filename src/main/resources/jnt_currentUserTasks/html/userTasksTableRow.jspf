@@ -73,7 +73,7 @@
                 </c:if>
                 <c:choose>
                     <c:when test="${task.properties.state.string == 'active' and task.properties['assigneeUserKey'].string ne user.path and assignable eq 'true'}">
-                        <a class="btn btn-primary btn-small" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','${user.path}');return false;" title="assign to me">
+                        <a class="btn btn-primary btn-small" href="#" onclick="sendNewAssignee('${task.identifier}','${fn:escapeXml(taskPathJs)}','${fn:escapeXml(functions:escapeJavaScript(user.path))}');return false;" title="assign to me">
                             <i class="icon-check icon-white"></i>
                             <fmt:message key="label.actions.assigneToMe"/>
                         </a>

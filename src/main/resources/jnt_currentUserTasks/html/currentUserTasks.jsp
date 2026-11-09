@@ -168,6 +168,7 @@
                 <c:set var="taskStatus" value="${task.properties.state.string}"/>
                 <c:set var="taskPathJs" value="${functions:escapeJavaScript(task.path)}"/>
                 <c:set var="taskPathHref" value="${fn:escapeXml(fn:replace(taskPathJs, '%', '%25'))}"/>
+                <c:set var="userPathHref" value="${fn:escapeXml(fn:replace(functions:escapeJavaScript(user.path), '%', '%25'))}"/>
                 <tr class="${status.count % 2 == 0 ? 'odd' : 'even'}">
                     <td headers="Title">
                         <span class="icon-task icon-task-${task.properties['priority'].string}"></span>&nbsp;<span class="opentask" onclick="switchTaskDisplay('${task.identifier}')">${fn:escapeXml(task.displayableName)}</span>
@@ -212,7 +213,7 @@
                                 </c:if>
                                 <c:choose>
                                     <c:when test="${taskStatus == 'active' and task.properties['assigneeUserKey'].string ne user.path and assignable eq 'true'}">
-                                        <li><a class="taskaction taskaction-assign" href="javascript:sendNewAssignee('${task.identifier}','${taskPathHref}','${user.path}')" title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
+                                        <li><a class="taskaction taskaction-assign" href="javascript:sendNewAssignee('${task.identifier}','${taskPathHref}','${userPathHref}')" title="assign to me"><fmt:message key="label.actions.assigneToMe"/></a></li>
                                     </c:when>
                                     <c:when test="${taskStatus == 'active' and task.properties['assigneeUserKey'].string eq user.path}">
                                         <li><a class="taskaction taskaction-refuse" href="javascript:sendNewAssignee('${task.identifier}','${taskPathHref}','')" title="Refuse"><fmt:message key="label.actions.refuse"/></a></li>
