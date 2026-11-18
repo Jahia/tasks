@@ -297,8 +297,11 @@ public class GqlTaskBoard {
 
     @GraphQLField
     @GraphQLDescription("One-line workflow summary for a jnt:workflowTask whose process is still live, e.g. "
-            + "\"en - One step publication started by anne on 7/20/26 - 1 content items involved\". Null for a "
-            + "plain jnt:task (no workflow at all), or if the underlying process can no longer be resolved.")
+            + "\"en - One step publication started by anne on 7/20/26 - 1 content items involved\". The leading "
+            + "language is the one the publication was REQUESTED in (see requestLanguage), not the viewer's; it "
+            + "is left out entirely when the request's language cannot be resolved. The date is formatted in the "
+            + "viewer's locale. Null for a plain jnt:task (no workflow at all), or if the underlying process can "
+            + "no longer be resolved.")
     public String getWorkflowSummary() {
         try {
             LiveWorkflow live = liveWorkflow();
@@ -313,15 +316,20 @@ public class GqlTaskBoard {
                 return null;
             }
 
-            Locale locale = JahiaLocaleContextHolder.getLocale();
+            // The viewer's locale formats the date; the request's locale names the language.
+            Locale viewerLocale = JahiaLocaleContextHolder.getLocale();
+            String requestLanguage = getRequestLanguage();
             String startUserDisplayName = resolveUserDisplayName(workflow.getStartUser());
-            String startDate = DateFormat.getDateInstance(DateFormat.SHORT, locale).format(workflow.getStartTime());
+            String startDate = DateFormat.getDateInstance(DateFormat.SHORT, viewerLocale).format(workflow.getStartTime());
             // The same count getRequestItemCount() answers, off the same list getRequestItems()
             // draws from: the card states the count and then lists the items, and reading those
             // two off separate places is how "5 content items involved" ends up above four rows.
             Integer itemCount = getRequestItemCount();
 
-            return locale.getLanguage() + " - " + live.task.getWorkflowDefinition().getDisplayName()
+            // Omitted, not defaulted to the viewer's language, when the request's is unknown.
+            String languagePrefix = requestLanguage == null ? "" : requestLanguage + " - ";
+
+            return languagePrefix + live.task.getWorkflowDefinition().getDisplayName()
                     + " started by " + startUserDisplayName + " on " + startDate
                     + " - " + (itemCount == null ? 0 : itemCount) + " content items involved";
         } catch (Exception e) {
@@ -330,6 +338,49 @@ public class GqlTaskBoard {
             // summary line is missing from this row, not that the whole board query fails.
             return null;
         }
+    }
+
+    /**
+     * The language the publication was requested in. Only the process records it: core's
+     * {@code WorkflowService#startProcess} stores the session locale as the {@code locale}
+     * variable; the task node has no language. Reads the same memoized process as
+     * {@link #requestNodeIds()}, so null once the process has ended.
+     */
+    private Locale requestLocale() {
+        Workflow workflow = liveWorkflow().workflow;
+        if (workflow == null || workflow.getVariables() == null) {
+            return null;
+        }
+
+        Object locale = workflow.getVariables().get("locale");
+        if (locale instanceof Locale) {
+            return (Locale) locale;
+        }
+        // The engine may return the persisted string instead: Locale#toString form ("fr_FR") or a
+        // BCP-47 tag ("fr-FR"). forLanguageTag answers ROOT for the former, so split on both.
+        if (locale instanceof String) {
+            String value = ((String) locale).trim();
+            if (value.isEmpty()) {
+                return null;
+            }
+            String[] parts = value.split("[_-]", 3);
+            return new Locale(parts[0], parts.length > 1 ? parts[1] : "", parts.length > 2 ? parts[2] : "");
+        }
+        return null;
+    }
+
+    @GraphQLField
+    @GraphQLDescription("The language the publication behind this task was REQUESTED in, as its ISO code (\"en\", "
+            + "\"fr\"), not the viewer's display language. Publishing is per-language, so this is what tells "
+            + "apart two tasks for the same content in different languages. Null when there is no request to read: a plain "
+            + "jnt:task, or a workflow task whose process has ended.")
+    public String getRequestLanguage() {
+        Locale locale = requestLocale();
+        if (locale == null) {
+            return null;
+        }
+        String language = locale.getLanguage();
+        return language.isEmpty() ? null : language;
     }
 
     @GraphQLField

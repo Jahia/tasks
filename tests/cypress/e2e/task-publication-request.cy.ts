@@ -28,6 +28,7 @@ type BoardNode = {
     taskType: string | null;
     title: string | null;
     workflowSummary: string | null;
+    requestLanguage: string | null;
     requestItemCount: number | null;
     requestItems: RequestItem[];
     targets: Array<{uuid: string; displayName: string}>;
@@ -105,6 +106,14 @@ describe('Publication request items on a workflow task', () => {
             // what lets a card say "showing 2 of 3" rather than silently claiming the request is
             // two items long.
             expect(task.requestItemCount).to.equal(REQUEST_SIZE);
+        });
+    });
+
+    it('names the language the publication was requested in', () => {
+        // The fixture starts the process with Locale.ENGLISH.
+        withWorkflowTask(null, task => {
+            expect(task.requestLanguage).to.equal('en');
+            expect(task.workflowSummary).to.match(/^en - /);
         });
     });
 

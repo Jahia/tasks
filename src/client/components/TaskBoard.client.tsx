@@ -241,6 +241,11 @@ function TaskCard({task, currentUserKey, canReviewAll, isBusy, canDrag, scope, g
                 {/* Beside the title, not on its own line: the state is what decides whether a
                     row is worth opening at all, so it reads with the name it belongs to. */}
                 <Chip label={stateLabel(task.state)} color={(task.state && STATE_CHIP_COLOR[task.state]) || 'default'}/>
+                {/* The requested language. Its colour must differ from every STATE_CHIP_COLOR
+                    value, or it reads as part of the state chip. */}
+                {task.requestLanguage && (
+                    <Chip label={task.requestLanguage.toUpperCase()} color="reassuring"/>
+                )}
                 {targetTitle && task.targetNode?.url && (
                     <a
                         className="task-board__target-link"

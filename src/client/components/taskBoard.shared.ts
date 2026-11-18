@@ -189,6 +189,7 @@ const TASK_CARD_FIELDS = /* GraphQL */ `
     possibleOutcomes
     description
     workflowSummary
+    requestLanguage
     viewerRole
     candidateDisplayNames
     requestItemCount
@@ -353,6 +354,9 @@ export type TaskBoardNode = {
     possibleOutcomes: string[];
     description: string | null;
     workflowSummary: string | null;
+    // The language the publication was requested in ("en"), not the viewer's. Null without a
+    // live request.
+    requestLanguage: string | null;
     // "assignee" | "candidate" | "none" -- kept as a plain string rather than a union, mirroring
     // the server's deliberately non-enum GraphQL field (see GqlTaskBoard#getViewerRole), so a role
     // added later doesn't turn into a type error here before anything consumes it.
