@@ -3,6 +3,8 @@ import {Banner, Button} from '@jahia/moonstone';
 import {callGraphQL} from '../lib/graphqlClient';
 import {announceTaskChanged} from '../lib/assignedTaskAlerts';
 import {capitalize, UPDATE_TASK_STATE_MUTATION} from './task.shared';
+import {REFUSED_STATE} from './taskBoard.shared';
+import {stateLabel} from './taskPresentation.client';
 import type {TaskNode} from './task.shared';
 
 type TaskDetailProps = {
@@ -45,19 +47,23 @@ export default function TaskDetail({task: initialTask, canModify, graphqlEndpoin
                 <dt>Assignee</dt>
                 <dd>{task.assigneeDisplayName ?? 'Unassigned'}</dd>
                 <dt>State</dt>
-                <dd>{capitalize(task.state)}</dd>
+                {/* stateLabel, not capitalize: this view has to call a state what the board and
+                    the list call it, or the same task reads as two different things. */}
+                <dd>{stateLabel(task.state)}</dd>
             </dl>
             {canModify && task.state === 'active' && (
                 <div className="task-detail__actions">
-                    <Button label="Suspend" isDisabled={isBusy} onClick={() => setState('suspended')}/>
+                    {/* "Refuse", matching TaskActions: it is the same transition to the same
+                        state, and naming it "Suspend" here made one action look like two. */}
+                    <Button label="Refuse" isDisabled={isBusy} onClick={() => setState(REFUSED_STATE)}/>
                     <Button label="Cancel" isDisabled={isBusy} onClick={() => setState('cancelled')}/>
                     <Button label="Complete" isDisabled={isBusy} onClick={() => setState('finished')}/>
                 </div>
             )}
-            {canModify && task.state === 'suspended' && (
+            {canModify && task.state === REFUSED_STATE && (
                 <div className="task-detail__actions">
                     <Button label="Cancel" isDisabled={isBusy} onClick={() => setState('cancelled')}/>
-                    <Button label="Continue" isDisabled={isBusy} onClick={() => setState('active')}/>
+                    <Button label="Resume" isDisabled={isBusy} onClick={() => setState('active')}/>
                 </div>
             )}
         </div>

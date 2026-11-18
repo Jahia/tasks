@@ -1,0 +1,26 @@
+query TaskBoardRequestItems($first: Int!, $limit: Int) {
+    taskBoard(first: $first) {
+        edges {
+            node {
+                id
+                taskType
+                title
+                workflowSummary
+                requestLanguage
+                requestItemCount
+                requestItems(limit: $limit) {
+                    uuid
+                    displayName
+                    typeName
+                    inPage
+                    locationPath
+                    previewUrl
+                }
+                targets {
+                    uuid
+                    displayName
+                }
+            }
+        }
+    }
+}

@@ -27,6 +27,7 @@ import javax.jcr.Value;
 import javax.jcr.query.Query;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -99,9 +100,20 @@ public final class TaskBoardQueryExtensions {
     // correctly) in the UI, so these are sorted in-memory, after the query, instead of via
     // JCR-SQL2's "order by".
     private static final String STATE_FIELD = "state";
+    private static final String PRIORITY_FIELD = "priority";
 
     private static final Set<String> RESOLVED_VALUE_SORT_FIELDS = new HashSet<>(Arrays.asList(
-            "title", "creator", "owner", STATE_FIELD));
+            "title", "creator", "owner", STATE_FIELD, PRIORITY_FIELD));
+
+    // Priority is a stored property, but sorting on it in JCR-SQL2 would order it alphabetically --
+    // high < low < normal -- which is not the order the words mean. So it joins the resolved-value
+    // sorts instead and is compared on this rank, lowest first, which makes "priority ascending"
+    // read low -> normal -> high as the column's arrow claims. Anything else (a value outside the
+    // node type's choicelist, or none at all) has no rank and sorts last in both directions, the
+    // same treatment resolvedValueComparator already gives a null title or owner.
+    private static final Map<String, String> PRIORITY_RANK = Collections.unmodifiableMap(
+            Stream.of(new String[][]{{"low", "0"}, {"normal", "1"}, {"high", "2"}})
+                    .collect(Collectors.toMap(entry -> entry[0], entry -> entry[1])));
 
     // The three questions the "My Tasks" board asks: what is mine, what did I hand out, and what
     // could I pick up. Each is a further NARROWING of the visibility clause the caller already
@@ -525,6 +537,8 @@ public final class TaskBoardQueryExtensions {
                 return GqlTaskBoard::getAssigneeDisplayName;
             case STATE_FIELD:
                 return GqlTaskBoard::getState;
+            case PRIORITY_FIELD:
+                return task -> PRIORITY_RANK.get(task.getPriority());
             default:
                 // Unreachable: only called when RESOLVED_VALUE_SORT_FIELDS.contains(sortBy).
                 throw new IllegalArgumentException("Not a resolved-value sort field: " + sortBy);
